@@ -13,6 +13,7 @@ param(
     [string]$MediaMTXPath,
     [string]$PythonPath,
     [string]$PicoConfigPath,
+    [string]$SlotPidMapPath = "D:\15game\gui_test_pc_slot_pids.json",
     [ValidateRange(1024, 65535)]
     [int]$ApiPort = 5110,
     [switch]$ConfigureTailscaleServe,
@@ -143,6 +144,7 @@ if (($Slots | Sort-Object -Unique) -join "," -ne "1,15") {
 if (!(Test-Path -LiteralPath $TemplatePath)) { throw "Missing MediaMTX template: $TemplatePath" }
 if (!(Test-Path -LiteralPath $ServerScript)) { throw "Missing metadata server: $ServerScript" }
 if (!(Test-Path -LiteralPath $Tailscale)) { throw "Tailscale CLI was not found: $Tailscale" }
+$env:GUI_TEST_PC_SLOT_PID_MAP = $SlotPidMapPath
 
 if ($Restart -and (Test-Path -LiteralPath $StatePath)) {
     & (Join-Path $Root "stop_stream_test.ps1") -IgnoreMissing
