@@ -1,0 +1,39 @@
+# Runtime and downloaded host tools
+host/runtime/
+host/tools/
+*.log
+*.pid
+__pycache__/
+*.pyc
+
+# Secrets and signing material
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.crt
+*.mobileprovision
+*.p8
+AuthKey_*.p8
+
+# Xcode and SwiftPM output
+ios/build/
+ios/dist/
+ios/DerivedData/
+ios/.build/
+ios/.swiftpm/
+ios/*.xcodeproj/
+!ios/*.xcodeproj/project.pbxproj
+ios/*.xcworkspace/
+**/xcuserdata/
+*.ipa
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
