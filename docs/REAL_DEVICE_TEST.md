@@ -7,7 +7,8 @@
 3. Run `host\start_stream_test.ps1 -ConfigureTailscaleServe` without an override flag.
 4. Confirm the startup report lists slot 1 and 15 with different source sizes but aspect `1.77778`.
 5. Open the printed `/oplink-test/api/v1/sources` URL from an iPhone on the same Tailnet.
-6. Reject the test if the HWND, PID, title, or aspect does not match the intended game window.
+6. Confirm `identity_source` is `gui_test_pc_pid_map`, `title_rename_ok` is true, and titles are `[01]`/`[15]`.
+7. Reject the test if the HWND, PID, process path, or aspect does not match the intended game window.
 
 ## Gate B: native stream
 
