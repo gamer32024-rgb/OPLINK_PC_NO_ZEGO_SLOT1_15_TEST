@@ -1,0 +1,48 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "scripts/audit_public_repo.py"
+      - ".github/workflows/build-unsigned-ipa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Audit public repository
+        run: python3 scripts/audit_public_repo.py
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Resolve WebRTC package
+        working-directory: ios
+        run: xcodebuild -resolvePackageDependencies -project OPLINKStreamTest.xcodeproj -scheme OPLINKStreamTest
+
+      - name: Build unsigned IPA
+        working-directory: ios
+        run: bash scripts/package_unsigned_ipa.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: OPLINKStreamTest-unsigned
+          path: ios/dist/OPLINKStreamTest-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
