@@ -12,3 +12,4 @@ Public source does not make every local file safe to publish. Never commit:
 
 GitHub Actions does not join the Tailnet. The built iOS app receives the host URL from the user at runtime and can connect only when the device already has access through Tailscale.
 
+The input endpoint also requires a random pairing token generated at each Windows host start. The token is stored only under the ignored `host/runtime` directory and must not be pasted into GitHub.

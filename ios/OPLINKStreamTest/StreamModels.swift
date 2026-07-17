@@ -4,7 +4,83 @@ struct StreamSourcesResponse: Decodable {
     let ok: Bool
     let profile: StreamProfile
     let encoder: String
+    let networkUnderlay: NetworkUnderlay
+    let input: StreamInputInfo
     let sources: [StreamSource]
+
+    enum CodingKeys: String, CodingKey {
+        case ok, profile, encoder, input, sources
+        case networkUnderlay = "network_underlay"
+    }
+}
+
+struct NetworkUnderlay: Decodable {
+    let gatePassed: Bool
+    let selectedAlias: String
+    let selectedDescription: String
+    let selectedEffectiveMetric: Int
+    let usbSharingCanWin: Bool
+    let overallDefaultAlias: String?
+    let overallDefaultIsSelectedEthernet: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case gatePassed = "gate_passed"
+        case selectedAlias = "selected_alias"
+        case selectedDescription = "selected_description"
+        case selectedEffectiveMetric = "selected_effective_metric"
+        case usbSharingCanWin = "usb_sharing_can_win"
+        case overallDefaultAlias = "overall_default_alias"
+        case overallDefaultIsSelectedEthernet = "overall_default_is_selected_ethernet"
+    }
+}
+
+struct StreamInputInfo: Decodable {
+    let enabled: Bool
+    let tokenRequired: Bool?
+    let reportMode: String?
+    let port: String?
+    let minSlotIntervalMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, port
+        case tokenRequired = "token_required"
+        case reportMode = "report_mode"
+        case minSlotIntervalMs = "min_slot_interval_ms"
+    }
+}
+
+struct StreamInputRequest: Encodable {
+    let slot: Int
+    let action: String
+    let x: Double
+    let y: Double
+    let pointerID: Int
+    let clientSentAtMs: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case slot, action, x, y
+        case pointerID = "pointer_id"
+        case clientSentAtMs = "client_sent_at_ms"
+    }
+}
+
+struct StreamInputResponse: Decodable {
+    let ok: Bool
+    let slot: Int
+    let action: String
+    let hostReceivedAtMs: Int64?
+    let hidAckAtMs: Int64?
+    let hostToHIDAckMs: Double
+    let slotCooldownWaitMs: Int
+    let backend: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok, slot, action, backend
+        case hostReceivedAtMs = "host_received_at_ms"
+        case hidAckAtMs = "hid_ack_at_ms"
+        case hostToHIDAckMs = "host_to_hid_ack_ms"
+        case slotCooldownWaitMs = "slot_cooldown_wait_ms"
+    }
 }
 
 struct StreamProfile: Decodable {
@@ -73,7 +149,7 @@ enum StreamEndpoint {
         replacingPath(base, with: String(format: "/oplink-whep/slot%02d/whep", slot))
     }
 
-    private static func replacingPath(_ base: URL, with path: String) -> URL {
+    static func replacingPath(_ base: URL, with path: String) -> URL {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = path
         components.query = nil
@@ -90,3 +166,12 @@ enum StreamConfigurationError: LocalizedError {
     }
 }
 
+enum StreamInputError: LocalizedError {
+    case rejected(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .rejected(let message): return message
+        }
+    }
+}

@@ -4,9 +4,16 @@ import WebRTC
 final class StreamViewController: UIViewController {
     private enum Defaults {
         static let host = "oplink.streamTest.host"
+        static let inputToken = "oplink.streamTest.inputToken"
+    }
+
+    private struct QueuedInput {
+        let command: TouchOverlayView.Command
+        let enqueuedAt: Date
     }
 
     private let videoView = RTCMTLVideoView(frame: .zero)
+    private let touchOverlay = TouchOverlayView(frame: .zero)
     private let chrome = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     private let slot1Button = UIButton(type: .system)
     private let slot15Button = UIButton(type: .system)
@@ -26,6 +33,11 @@ final class StreamViewController: UIViewController {
     private var renderedSize = CGSize.zero
     private var renderedFPS = 0
     private var lastSwitchMilliseconds: Int?
+    private var lastInputRTTMilliseconds: Int?
+    private var lastHostToHIDMilliseconds: Double?
+    private var lastInputBackend = "--"
+    private var inputQueue: [QueuedInput] = []
+    private var inputInFlight = false
     private var metricsTimer: Timer?
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
@@ -69,11 +81,18 @@ final class StreamViewController: UIViewController {
         videoView.videoContentMode = .scaleAspectFit
         videoView.backgroundColor = .black
         view.addSubview(videoView)
+        touchOverlay.translatesAutoresizingMaskIntoConstraints = false
+        touchOverlay.isUserInteractionEnabled = false
+        view.addSubview(touchOverlay)
         NSLayoutConstraint.activate([
             videoView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             videoView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             videoView.topAnchor.constraint(equalTo: view.topAnchor),
-            videoView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            videoView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            touchOverlay.leadingAnchor.constraint(equalTo: videoView.leadingAnchor),
+            touchOverlay.trailingAnchor.constraint(equalTo: videoView.trailingAnchor),
+            touchOverlay.topAnchor.constraint(equalTo: videoView.topAnchor),
+            touchOverlay.bottomAnchor.constraint(equalTo: videoView.bottomAnchor)
         ])
 
         chrome.translatesAutoresizingMaskIntoConstraints = false
@@ -138,10 +157,10 @@ final class StreamViewController: UIViewController {
 
         metricsLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         metricsLabel.textColor = .white
-        metricsLabel.numberOfLines = 1
+        metricsLabel.numberOfLines = 2
         targetLabel.font = .systemFont(ofSize: 10, weight: .bold)
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
-        targetLabel.text = "TARGET 720P / 30 FPS / SWITCH < 1000 MS"
+        targetLabel.text = "TARGET 720P / 30 FPS / SWITCH < 1000 MS / INPUT RTT < 300 MS"
 
         let metricsStack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
         metricsStack.axis = .vertical
@@ -174,6 +193,7 @@ final class StreamViewController: UIViewController {
                 self.lastSwitchMilliseconds = Int(Date().timeIntervalSince(switchStartedAt) * 1000)
             }
             self.switchStartedAt = nil
+            self.touchOverlay.isUserInteractionEnabled = self.configuredInputToken() != nil
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
         }
@@ -186,6 +206,9 @@ final class StreamViewController: UIViewController {
         }
         whepClient.onError = { [weak self] error in
             self?.setStatus(error.localizedDescription, good: false)
+        }
+        touchOverlay.onCommand = { [weak self] command in
+            self?.enqueueInput(command)
         }
     }
 
@@ -204,6 +227,11 @@ final class StreamViewController: UIViewController {
         lastSwitchMilliseconds = nil
         renderedFPS = 0
         renderedSize = .zero
+        lastInputRTTMilliseconds = nil
+        lastHostToHIDMilliseconds = nil
+        inputQueue.removeAll()
+        inputInFlight = false
+        touchOverlay.isUserInteractionEnabled = false
         frameMonitor.reset()
         whepClient.stop()
         refreshButtonState()
@@ -227,7 +255,7 @@ final class StreamViewController: UIViewController {
                         self.setStatus("拒絕非 16:9 來源", good: false)
                         return
                     }
-                    self.updateSourceLabel(source: source, profile: response.profile, encoder: response.encoder)
+                    self.updateSourceLabel(source: source, response: response)
                     self.whepClient.connect(
                         endpoint: StreamEndpoint.whep(base: baseURL, slot: slot),
                         renderer: self.frameMonitor
@@ -237,10 +265,15 @@ final class StreamViewController: UIViewController {
         }
     }
 
-    private func updateSourceLabel(source: StreamSource, profile: StreamProfile, encoder: String) {
+    private func updateSourceLabel(source: StreamSource, response: StreamSourcesResponse) {
         let logical = source.clientLogical.map { "\($0.w)x\($0.h)" } ?? "?"
         let capture = source.capturePhysicalExpected.map { "\($0.w)x\($0.h)" } ?? "?"
-        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(profile.encoded.w)x\(profile.encoded.h) | \(encoder)"
+        let network = response.networkUnderlay
+        let defaultRoute = network.overallDefaultIsSelectedEthernet == true
+            ? "ETH"
+            : (network.overallDefaultAlias ?? "UNKNOWN")
+        lastInputBackend = response.input.reportMode ?? "disabled"
+        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(network.selectedAlias) m=\(network.selectedEffectiveMetric) | USB-WIN \(network.usbSharingCanWin ? "YES" : "NO") | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
     }
 
     private func refreshButtonState() {
@@ -274,11 +307,62 @@ final class StreamViewController: UIViewController {
             ? "0x0"
             : "\(Int(renderedSize.width))x\(Int(renderedSize.height))"
         let switchText = lastSwitchMilliseconds.map { "\($0)ms" } ?? "--"
-        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)"
-        if let milliseconds = lastSwitchMilliseconds {
-            targetLabel.textColor = milliseconds <= 1000
+        let inputRTT = lastInputRTTMilliseconds.map { "\($0)ms" } ?? "--"
+        let hostToHID = lastHostToHIDMilliseconds.map { String(format: "%.1fms", $0) } ?? "--"
+        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nINPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
+        if let switchMs = lastSwitchMilliseconds, let inputMs = lastInputRTTMilliseconds {
+            targetLabel.textColor = switchMs <= 1000 && inputMs <= 300
                 ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
                 : UIColor(red: 1, green: 0.35, blue: 0.26, alpha: 1)
+        }
+    }
+
+    private func enqueueInput(_ command: TouchOverlayView.Command) {
+        guard configuredBaseURL() != nil, configuredInputToken() != nil else {
+            setStatus("尚未設定 pairing token", good: false)
+            return
+        }
+        let item = QueuedInput(command: command, enqueuedAt: Date())
+        if command.action == "move", inputQueue.last?.command.action == "move" {
+            inputQueue[inputQueue.count - 1] = item
+        } else {
+            inputQueue.append(item)
+        }
+        drainInputQueue()
+    }
+
+    private func drainInputQueue() {
+        guard !inputInFlight, !inputQueue.isEmpty,
+              let baseURL = configuredBaseURL(),
+              let token = configuredInputToken() else { return }
+        inputInFlight = true
+        let queued = inputQueue.removeFirst()
+        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
+        let request = StreamInputRequest(
+            slot: selectedSlot,
+            action: queued.command.action,
+            x: queued.command.x,
+            y: queued.command.y,
+            pointerID: 0,
+            clientSentAtMs: sentAt
+        )
+        let requestStartedAt = Date()
+        api.sendInput(baseURL: baseURL, token: token, input: request) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.inputInFlight = false
+                switch result {
+                case .success(let response):
+                    self.lastInputRTTMilliseconds = Int(Date().timeIntervalSince(requestStartedAt) * 1000)
+                    self.lastHostToHIDMilliseconds = response.hostToHIDAckMs
+                    self.lastInputBackend = response.backend
+                    self.updateMetrics()
+                case .failure(let error):
+                    self.inputQueue.removeAll()
+                    self.setStatus(error.localizedDescription, good: false)
+                }
+                self.drainInputQueue()
+            }
         }
     }
 
@@ -287,11 +371,17 @@ final class StreamViewController: UIViewController {
         return try? StreamEndpoint.normalizedHost(value)
     }
 
+    private func configuredInputToken() -> String? {
+        guard let token = UserDefaults.standard.string(forKey: Defaults.inputToken)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else { return nil }
+        return token
+    }
+
     @objc private func presentHostSettings() {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "Tailnet Windows 主機",
-            message: "輸入啟動器顯示的 HTTPS 主機，不要加入 /oplink-test 或 key。",
+            message: "輸入啟動器顯示的 HTTPS 主機及本機 pairing token。不要輸入 Tailscale auth key。",
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -301,12 +391,22 @@ final class StreamViewController: UIViewController {
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
         }
+        alert.addTextField { field in
+            field.placeholder = "本機 pairing token"
+            field.text = UserDefaults.standard.string(forKey: Defaults.inputToken)
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "儲存並連線", style: .default) { [weak self, weak alert] _ in
-            guard let self, let value = alert?.textFields?.first?.text else { return }
+            guard let self,
+                  let value = alert?.textFields?.first?.text,
+                  let token = alert?.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !token.isEmpty else { return }
             do {
                 let base = try StreamEndpoint.normalizedHost(value)
                 UserDefaults.standard.set(base.absoluteString, forKey: Defaults.host)
+                UserDefaults.standard.set(token, forKey: Defaults.inputToken)
                 self.connect(slot: self.selectedSlot)
             } catch {
                 self.setStatus(error.localizedDescription, good: false)
@@ -321,4 +421,3 @@ final class StreamViewController: UIViewController {
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
     }
 }
-

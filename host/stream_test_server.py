@@ -11,6 +11,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from pico_stream_input import PicoStreamInputController, PicoStreamInputError
+
 
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
@@ -123,12 +125,16 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
             {"encoded": {"w": 1280, "h": 720}, "fps": 30, "bitrate_kbps": 4000},
         ),
         "encoder": state.get("encoder", "unknown"),
+        "network_underlay": state.get("network_underlay", {}),
+        "input": state.get("input", {"enabled": False}),
         "sources": [source_identity(slot) for slot in slots],
     }
 
 
 class Handler(BaseHTTPRequestHandler):
     slots = [1, 15]
+    input_token = ""
+    input_controller: PicoStreamInputController | None = None
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -160,6 +166,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        if path.startswith("/oplink-test/"):
+            path = path.removeprefix("/oplink-test")
+        if path != "/api/v1/input":
+            self.send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+        if not self.input_controller or not self.input_token:
+            self._json({"ok": False, "error": "Pico input is disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        authorization = self.headers.get("Authorization", "")
+        if authorization != f"Bearer {self.input_token}":
+            self._json({"ok": False, "error": "invalid pairing token"}, HTTPStatus.UNAUTHORIZED)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 16_384:
+                raise ValueError("invalid request body length")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be a JSON object")
+            slot = int(payload.get("slot") or 0)
+            result = self.input_controller.handle(payload, source_identity(slot))
+            self._json(result)
+        except (ValueError, json.JSONDecodeError, PicoStreamInputError) as exc:
+            self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="OPLINK_PC slot 1/15 stream metadata service")
@@ -167,12 +200,24 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=5110)
     parser.add_argument("--slots", default="1,15")
     parser.add_argument("--probe", type=int)
+    parser.add_argument("--pico-config")
+    parser.add_argument("--input-token-file")
+    parser.add_argument("--pico-health", action="store_true")
     args = parser.parse_args()
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
     if args.probe is not None:
         print(json.dumps(source_identity(args.probe), separators=(",", ":")))
         return 0
+    controller = PicoStreamInputController(args.pico_config) if args.pico_config else None
+    if args.pico_health:
+        if controller is None:
+            raise SystemExit("--pico-health requires --pico-config")
+        print(json.dumps(controller.health(), separators=(",", ":")))
+        return 0
     Handler.slots = slots
+    Handler.input_controller = controller
+    if args.input_token_file:
+        Handler.input_token = Path(args.input_token_file).read_text(encoding="utf-8").strip()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Metadata service listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()
@@ -181,4 +226,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

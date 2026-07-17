@@ -12,9 +12,12 @@ param(
     [string]$FFmpegPath,
     [string]$MediaMTXPath,
     [string]$PythonPath,
+    [string]$PicoConfigPath,
     [ValidateRange(1024, 65535)]
     [int]$ApiPort = 5110,
     [switch]$ConfigureTailscaleServe,
+    [switch]$AllowNonEthernetUnderlay,
+    [switch]$AllowVpnDefaultRoute,
     [switch]$Restart
 )
 
@@ -74,6 +77,66 @@ function Stop-StartedProcesses {
     }
 }
 
+function Get-PhysicalUnderlayGate {
+    $routes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue)
+    $interfaces = @(Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue)
+    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue)
+    $rows = @()
+    foreach ($route in $routes) {
+        $ipInterface = $interfaces | Where-Object InterfaceIndex -eq $route.InterfaceIndex | Select-Object -First 1
+        $adapter = $adapters | Where-Object InterfaceIndex -eq $route.InterfaceIndex | Select-Object -First 1
+        if (!$adapter -or $adapter.Status -ne "Up" -or !$ipInterface) { continue }
+        $description = [string]$adapter.InterfaceDescription
+        $isTunnel = $description -match "Tailscale|WireGuard|VPN|Surfshark|Tunnel|Virtual"
+        if ($isTunnel) { continue }
+        $isUsbSharing = $description -match "Remote NDIS|USB|Internet Sharing"
+        $isEthernet = [string]$adapter.MediaType -eq "802.3" -and !$isUsbSharing
+        $rows += [pscustomobject]@{
+            alias = [string]$route.InterfaceAlias
+            description = $description
+            media_type = [string]$adapter.MediaType
+            route_metric = [int]$route.RouteMetric
+            interface_metric = [int]$ipInterface.InterfaceMetric
+            effective_metric = [int]$route.RouteMetric + [int]$ipInterface.InterfaceMetric
+            next_hop = [string]$route.NextHop
+            is_ethernet = $isEthernet
+            is_usb_sharing = $isUsbSharing
+        }
+    }
+    $best = $rows | Sort-Object effective_metric | Select-Object -First 1
+    if (!$best) { throw "No active physical IPv4 default route was found." }
+    $usbCanWin = @($rows | Where-Object { $_.is_usb_sharing -and $_.effective_metric -le $best.effective_metric }).Count -gt 0
+    $passed = [bool]$best.is_ethernet -and !$usbCanWin
+    if (!$passed -and !$AllowNonEthernetUnderlay) {
+        throw "Ethernet underlay gate failed. Best physical route is '$($best.alias)' ($($best.description)), metric=$($best.effective_metric)."
+    }
+    $overallBest = $routes | ForEach-Object {
+        $route = $_
+        $ipInterface = $interfaces | Where-Object InterfaceIndex -eq $route.InterfaceIndex | Select-Object -First 1
+        if ($ipInterface) {
+            [pscustomobject]@{ alias = [string]$route.InterfaceAlias; metric = [int]$route.RouteMetric + [int]$ipInterface.InterfaceMetric }
+        }
+    } | Sort-Object metric | Select-Object -First 1
+    $overallUsesSelectedEthernet = [bool]$overallBest -and $overallBest.alias -eq $best.alias
+    if (!$overallUsesSelectedEthernet -and !$AllowVpnDefaultRoute) {
+        throw "Overall default route is '$($overallBest.alias)' (metric=$($overallBest.metric)), not selected Ethernet '$($best.alias)'. Disable Surfshark/VPN for the acceptance test, or use -AllowVpnDefaultRoute for development only."
+    }
+    return [ordered]@{
+        gate_passed = $passed -and $overallUsesSelectedEthernet
+        physical_gate_passed = $passed
+        rule = "physical_and_overall_default_route_must_be_selected_wired_ethernet"
+        selected_alias = [string]$best.alias
+        selected_description = [string]$best.description
+        selected_effective_metric = [int]$best.effective_metric
+        usb_sharing_can_win = $usbCanWin
+        overall_default_alias = if ($overallBest) { [string]$overallBest.alias } else { $null }
+        overall_default_metric = if ($overallBest) { [int]$overallBest.metric } else { $null }
+        overall_default_is_selected_ethernet = $overallUsesSelectedEthernet
+        vpn_default_override = [bool]$AllowVpnDefaultRoute
+        candidates = @($rows)
+    }
+}
+
 if (($Slots | Sort-Object -Unique) -join "," -ne "1,15") {
     throw "This test has a fixed source set: -Slots 1,15"
 }
@@ -100,10 +163,14 @@ $MediaMTX = Resolve-Executable -ExplicitPath $MediaMTXPath -EnvironmentPath $env
     -CommandName "mediamtx" -Fallbacks @((Join-Path $Root "tools\mediamtx\mediamtx.exe"))
 $Python = Resolve-Executable -ExplicitPath $PythonPath -EnvironmentPath $env:OPLINK_PYTHON `
     -CommandName "python" -Fallbacks @("C:\Users\andyb\Documents\star_cros_bot\.venv\Scripts\python.exe")
+$WorkspaceRoot = Split-Path (Split-Path $Root -Parent) -Parent
+$PicoConfig = if ($PicoConfigPath) { $PicoConfigPath } else { Join-Path $WorkspaceRoot "GUI_TEST_PC_DEV_20260703\config_pc\pico_touch.json" }
 
 if (!$FFmpeg) { throw "FFmpeg was not found. Install a build containing gfxcapture or pass -FFmpegPath." }
 if (!$MediaMTX) { throw "MediaMTX was not found. Run .\install_mediamtx.ps1 or pass -MediaMTXPath." }
 if (!$Python) { throw "Python 3 was not found. Pass -PythonPath." }
+if (!(Test-Path -LiteralPath $PicoConfig -PathType Leaf)) { throw "Pico config was not found: $PicoConfig" }
+$PicoConfig = (Resolve-Path -LiteralPath $PicoConfig).Path
 
 $filterInfo = & $FFmpeg -hide_banner -filters 2>&1 | Out-String
 if ($filterInfo -notmatch "\bgfxcapture\b") {
@@ -118,6 +185,7 @@ if (!$tailscaleIPv4) { throw "No active Tailscale IPv4 address was found." }
 $tailscaleStatus = & $Tailscale status --json | ConvertFrom-Json
 $tailscaleDnsName = ([string]$tailscaleStatus.Self.DNSName).TrimEnd(".")
 if (!$tailscaleDnsName) { throw "Tailscale did not return this host's DNS name." }
+$networkUnderlay = Get-PhysicalUnderlayGate
 
 $profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
 $profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
@@ -136,6 +204,16 @@ foreach ($slot in $Slots) {
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 $configText = (Get-Content -LiteralPath $TemplatePath -Raw).Replace("__TAILSCALE_IPV4__", $tailscaleIPv4)
 [System.IO.File]::WriteAllText($RuntimeConfig, $configText, [System.Text.UTF8Encoding]::new($false))
+$tokenBytes = New-Object byte[] 24
+$random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$random.GetBytes($tokenBytes)
+$random.Dispose()
+$inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+$inputTokenPath = Join-Path $Runtime "input_token.txt"
+[System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
+$picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
+if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }
+$picoHealth = $picoHealthText | ConvertFrom-Json
 
 $selectedEncoder = $Encoder
 if ($Encoder -eq "auto" -or $Encoder -eq "nvenc") {
@@ -164,7 +242,10 @@ try {
     Start-Sleep -Milliseconds 750
     if ($media.HasExited) { throw "MediaMTX exited during startup." }
 
-    $api = Start-HiddenProcess -FilePath $Python -Arguments @($ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort") `
+    $api = Start-HiddenProcess -FilePath $Python -Arguments @(
+        $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
+        "--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath
+    ) `
         -StdoutPath (Join-Path $Runtime "api.out.log") -StderrPath (Join-Path $Runtime "api.err.log")
 
     $publishers = @()
@@ -202,6 +283,15 @@ try {
             bitrate_kbps = $BitrateKbps
         }
         encoder = $selectedEncoder
+        network_underlay = $networkUnderlay
+        input = [ordered]@{
+            enabled = $true
+            token_required = $true
+            report_mode = [string]$picoHealth.report_mode
+            port = [string]$picoHealth.port
+            min_slot_interval_ms = [int]$picoHealth.min_slot_interval_ms
+            measurement = "network_rtt_and_host_to_hid_ack"
+        }
         source_identities = $identities
         tailscale = [ordered]@{
             ipv4 = $tailscaleIPv4
@@ -240,6 +330,9 @@ try {
             $identity.capture_physical_expected.w, $identity.capture_physical_expected.h, $identity.aspect)
     }
     Write-Host "iOS app host: https://$tailscaleDnsName"
+    Write-Host "iOS pairing token: $inputToken"
+    Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
+    Write-Host "Pico input: $($picoHealth.report_mode) on $($picoHealth.port)"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
     Write-Host "WHEP slot 1: https://$tailscaleDnsName/oplink-whep/slot01/whep"
     Write-Host "WHEP slot 15: https://$tailscaleDnsName/oplink-whep/slot15/whep"
