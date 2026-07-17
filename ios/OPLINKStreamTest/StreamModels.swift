@@ -21,6 +21,7 @@ struct NetworkUnderlay: Decodable {
     let selectedEffectiveMetric: Int
     let usbSharingCanWin: Bool
     let overallDefaultAlias: String?
+    let overallDefaultIsSelectedEthernet: Bool?
 
     enum CodingKeys: String, CodingKey {
         case gatePassed = "gate_passed"
@@ -29,6 +30,7 @@ struct NetworkUnderlay: Decodable {
         case selectedEffectiveMetric = "selected_effective_metric"
         case usbSharingCanWin = "usb_sharing_can_win"
         case overallDefaultAlias = "overall_default_alias"
+        case overallDefaultIsSelectedEthernet = "overall_default_is_selected_ethernet"
     }
 }
 
