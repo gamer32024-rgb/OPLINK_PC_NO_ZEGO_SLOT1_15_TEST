@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import os
 import re
 import time
 from ctypes import wintypes
@@ -17,6 +18,10 @@ from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
 SLOT_TITLE = re.compile(r"^\[(\d{2})\](?:\s.*)?$")
+SLOT_PID_MAP_PATH = Path(
+    os.environ.get("GUI_TEST_PC_SLOT_PID_MAP", r"D:\15game\gui_test_pc_slot_pids.json")
+)
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
 def _window_text(user32: ctypes.WinDLL, hwnd: int) -> str:
@@ -26,8 +31,66 @@ def _window_text(user32: ctypes.WinDLL, hwnd: int) -> str:
     return buffer.value.strip()
 
 
+def _process_path(pid: int) -> str | None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        capacity = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(capacity.value)
+        if not kernel32.QueryFullProcessImageNameW(
+            handle, 0, buffer, ctypes.byref(capacity)
+        ):
+            return None
+        return buffer.value
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _slot_pid_map() -> dict[int, dict[str, object]]:
+    if not SLOT_PID_MAP_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(SLOT_PID_MAP_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    result: dict[int, dict[str, object]] = {}
+    if not isinstance(payload, dict):
+        return result
+    for slot_text, value in payload.items():
+        try:
+            slot = int(slot_text)
+            pid = int((value or {}).get("Pid") or (value or {}).get("pid") or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if 1 <= slot <= 15 and pid > 0:
+            result[pid] = {
+                "slot": slot,
+                "expected_exe": str((value or {}).get("Exe") or ""),
+            }
+    return result
+
+
+def _numbered_title(slot: int, title: str) -> str:
+    base = re.sub(r"^\[\d{1,2}\]\s*", "", title).strip() or "StarCG"
+    return f"[{slot:02d}] {base}"
+
+
 def _window_candidates() -> list[dict[str, object]]:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
+    pid_map = _slot_pid_map()
     candidates: list[dict[str, object]] = []
 
     enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -37,9 +100,36 @@ def _window_candidates() -> list[dict[str, object]]:
         if not user32.IsWindowVisible(hwnd):
             return True
         title = _window_text(user32, hwnd)
-        match = SLOT_TITLE.match(title)
-        if not match:
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        pid_value = int(pid.value)
+        mapped = pid_map.get(pid_value)
+        title_match = SLOT_TITLE.match(title)
+        if mapped:
+            slot = int(mapped["slot"])
+            identity_source = "gui_test_pc_pid_map"
+        elif title_match:
+            slot = int(title_match.group(1))
+            identity_source = "window_title"
+        else:
             return True
+
+        process_path = _process_path(pid_value)
+        expected_exe = str((mapped or {}).get("expected_exe") or "")
+        if process_path and Path(process_path).name.casefold() != "starcg.exe":
+            return True
+        if expected_exe and process_path:
+            expected_normalized = os.path.normcase(os.path.abspath(expected_exe))
+            actual_normalized = os.path.normcase(os.path.abspath(process_path))
+            if expected_normalized != actual_normalized:
+                return True
+
+        desired_title = _numbered_title(slot, title)
+        title_rename_ok = title == desired_title
+        if not title_rename_ok:
+            title_rename_ok = bool(user32.SetWindowTextW(hwnd, desired_title))
+            if title_rename_ok:
+                title = desired_title
 
         rect = wintypes.RECT()
         if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
@@ -49,18 +139,20 @@ def _window_candidates() -> list[dict[str, object]]:
         if width <= 0 or height <= 0:
             return True
 
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         try:
             dpi = int(user32.GetDpiForWindow(hwnd)) or 96
         except AttributeError:
             dpi = 96
         candidates.append(
             {
-                "slot": int(match.group(1)),
+                "slot": slot,
                 "hwnd": int(hwnd),
-                "pid": int(pid.value),
+                "pid": pid_value,
                 "title": title,
+                "title_rename_ok": title_rename_ok,
+                "identity_source": identity_source,
+                "process_path": process_path,
+                "slot_pid_map_path": str(SLOT_PID_MAP_PATH) if mapped else None,
                 "client_logical": {"w": width, "h": height},
                 "window_dpi": dpi,
                 "capture_physical_expected": {
@@ -83,7 +175,10 @@ def source_identity(slot: int) -> dict[str, object]:
         return {
             "ok": False,
             "slot": slot,
-            "error": f"No visible game window named [{slot:02d}] was found",
+            "error": (
+                f"No visible slot {slot} game window was found by GUI_TEST_PC PID map "
+                f"or [{slot:02d}] title"
+            ),
             "captured_at_ms": int(time.time() * 1000),
         }
     if len(matches) > 1:
