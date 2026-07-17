@@ -17,6 +17,7 @@ param(
     [int]$ApiPort = 5110,
     [switch]$ConfigureTailscaleServe,
     [switch]$AllowNonEthernetUnderlay,
+    [switch]$AllowVpnDefaultRoute,
     [switch]$Restart
 )
 
@@ -116,15 +117,22 @@ function Get-PhysicalUnderlayGate {
             [pscustomobject]@{ alias = [string]$route.InterfaceAlias; metric = [int]$route.RouteMetric + [int]$ipInterface.InterfaceMetric }
         }
     } | Sort-Object metric | Select-Object -First 1
+    $overallUsesSelectedEthernet = [bool]$overallBest -and $overallBest.alias -eq $best.alias
+    if (!$overallUsesSelectedEthernet -and !$AllowVpnDefaultRoute) {
+        throw "Overall default route is '$($overallBest.alias)' (metric=$($overallBest.metric)), not selected Ethernet '$($best.alias)'. Disable Surfshark/VPN for the acceptance test, or use -AllowVpnDefaultRoute for development only."
+    }
     return [ordered]@{
-        gate_passed = $passed
-        rule = "lowest_metric_physical_default_route_must_be_wired_ethernet"
+        gate_passed = $passed -and $overallUsesSelectedEthernet
+        physical_gate_passed = $passed
+        rule = "physical_and_overall_default_route_must_be_selected_wired_ethernet"
         selected_alias = [string]$best.alias
         selected_description = [string]$best.description
         selected_effective_metric = [int]$best.effective_metric
         usb_sharing_can_win = $usbCanWin
         overall_default_alias = if ($overallBest) { [string]$overallBest.alias } else { $null }
         overall_default_metric = if ($overallBest) { [int]$overallBest.metric } else { $null }
+        overall_default_is_selected_ethernet = $overallUsesSelectedEthernet
+        vpn_default_override = [bool]$AllowVpnDefaultRoute
         candidates = @($rows)
     }
 }
@@ -323,7 +331,7 @@ try {
     }
     Write-Host "iOS app host: https://$tailscaleDnsName"
     Write-Host "iOS pairing token: $inputToken"
-    Write-Host "Underlay gate: Ethernet=$($networkUnderlay.gate_passed) interface=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win)"
+    Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
     Write-Host "Pico input: $($picoHealth.report_mode) on $($picoHealth.port)"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
     Write-Host "WHEP slot 1: https://$tailscaleDnsName/oplink-whep/slot01/whep"
