@@ -7,7 +7,8 @@ This isolated proof of concept compares native Windows game `.EXE` slots 1 and 1
 | Item | Test rule |
 |---|---|
 | Sources | Slot 1 and slot 15 only |
-| Capture | FFmpeg `gfxcapture` by exact game HWND |
+| Identity | GUI_TEST_PC launcher PID map, with `[01]`/`[15]` title fallback |
+| Capture | FFmpeg `gfxcapture` by exact verified game HWND |
 | Output | H.264, `1280x720`, 30 fps, 4 Mbps |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
 | Network | Tailscale Serve for WHEP signaling; media ICE advertises only the host Tailscale IPv4 |
@@ -24,6 +25,8 @@ Measured on 2026-07-17 at Windows display scale 150%:
 | 15 | 384x216 | 576x324 | 16:9 |
 
 The source sizes differ, but the aspect ratio does not. The host normalizes both streams to 720p and publishes the original geometry as metadata. The iOS app never hard-codes either source size.
+
+The host reads `D:\15game\gui_test_pc_slot_pids.json` by default, verifies the mapped PID belongs to `StarCG.exe`, and reapplies `[01]` through `[15]` titles before capture. Pass `-SlotPidMapPath` if the launcher map moves. Window position is never used to guess slot identity.
 
 ## Windows host
 
