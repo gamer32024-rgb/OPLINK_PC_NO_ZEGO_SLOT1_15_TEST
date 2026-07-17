@@ -269,8 +269,11 @@ final class StreamViewController: UIViewController {
         let logical = source.clientLogical.map { "\($0.w)x\($0.h)" } ?? "?"
         let capture = source.capturePhysicalExpected.map { "\($0.w)x\($0.h)" } ?? "?"
         let network = response.networkUnderlay
+        let defaultRoute = network.overallDefaultIsSelectedEthernet == true
+            ? "ETH"
+            : (network.overallDefaultAlias ?? "UNKNOWN")
         lastInputBackend = response.input.reportMode ?? "disabled"
-        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(network.selectedAlias) m=\(network.selectedEffectiveMetric) | USB-WIN \(network.usbSharingCanWin ? "YES" : "NO") | PICO \(lastInputBackend)"
+        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(network.selectedAlias) m=\(network.selectedEffectiveMetric) | USB-WIN \(network.usbSharingCanWin ? "YES" : "NO") | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
     }
 
     private func refreshButtonState() {
