@@ -21,7 +21,7 @@ That helper does not sign an IPA by itself and does not store Apple credentials.
 ## Install this build
 
 1. Open Sideloadly on Windows.
-2. Select `dist\OPLINKStreamTest-unsigned.ipa`.
+2. Select `dist\OPLINKStreamTest-unsigned-run3.ipa`.
 3. Select the iPhone 12 Pro Max and sign with the Apple ID used for sideloading.
 4. Install the app and trust the developer profile if iOS requests it.
 5. Keep the iPhone on Tailscale for streaming. USB is not part of the stream transport.
