@@ -2,11 +2,11 @@
 param(
     [int[]]$Slots = @(1, 15),
     [ValidateSet("720p", "1080p")]
-    [string]$Profile = "720p",
+    [string]$Profile = "1080p",
     [ValidateRange(1, 60)]
     [int]$Fps = 30,
     [ValidateRange(250, 20000)]
-    [int]$BitrateKbps = 4000,
+    [int]$BitrateKbps = 6000,
     [ValidateSet("auto", "nvenc", "x264")]
     [string]$Encoder = "auto",
     [string]$FFmpegPath,
@@ -19,6 +19,7 @@ param(
     [switch]$ConfigureTailscaleServe,
     [switch]$AllowNonEthernetUnderlay,
     [switch]$AllowVpnDefaultRoute,
+    [switch]$DisableInput,
     [switch]$Restart
 )
 
@@ -206,16 +207,22 @@ foreach ($slot in $Slots) {
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 $configText = (Get-Content -LiteralPath $TemplatePath -Raw).Replace("__TAILSCALE_IPV4__", $tailscaleIPv4)
 [System.IO.File]::WriteAllText($RuntimeConfig, $configText, [System.Text.UTF8Encoding]::new($false))
-$tokenBytes = New-Object byte[] 24
-$random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-$random.GetBytes($tokenBytes)
-$random.Dispose()
-$inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+$inputToken = ""
 $inputTokenPath = Join-Path $Runtime "input_token.txt"
-[System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
-$picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
-if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }
-$picoHealth = $picoHealthText | ConvertFrom-Json
+$picoHealth = $null
+if ($DisableInput) {
+    if (Test-Path -LiteralPath $inputTokenPath) { Remove-Item -LiteralPath $inputTokenPath -Force }
+} else {
+    $tokenBytes = New-Object byte[] 24
+    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $random.GetBytes($tokenBytes)
+    $random.Dispose()
+    $inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+    [System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
+    $picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
+    if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }
+    $picoHealth = $picoHealthText | ConvertFrom-Json
+}
 
 $selectedEncoder = $Encoder
 if ($Encoder -eq "auto" -or $Encoder -eq "nvenc") {
@@ -244,10 +251,11 @@ try {
     Start-Sleep -Milliseconds 750
     if ($media.HasExited) { throw "MediaMTX exited during startup." }
 
-    $api = Start-HiddenProcess -FilePath $Python -Arguments @(
-        $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
-        "--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath
-    ) `
+    $apiArguments = @($ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort")
+    if (!$DisableInput) {
+        $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
+    }
+    $api = Start-HiddenProcess -FilePath $Python -Arguments $apiArguments `
         -StdoutPath (Join-Path $Runtime "api.out.log") -StderrPath (Join-Path $Runtime "api.err.log")
 
     $publishers = @()
@@ -286,13 +294,22 @@ try {
         }
         encoder = $selectedEncoder
         network_underlay = $networkUnderlay
-        input = [ordered]@{
-            enabled = $true
-            token_required = $true
-            report_mode = [string]$picoHealth.report_mode
-            port = [string]$picoHealth.port
-            min_slot_interval_ms = [int]$picoHealth.min_slot_interval_ms
-            measurement = "network_rtt_and_host_to_hid_ack"
+        input = if ($DisableInput) {
+            [ordered]@{
+                enabled = $false
+                token_required = $false
+                report_mode = "disabled_for_stream_test"
+                measurement = "disabled"
+            }
+        } else {
+            [ordered]@{
+                enabled = $true
+                token_required = $true
+                report_mode = [string]$picoHealth.report_mode
+                port = [string]$picoHealth.port
+                min_slot_interval_ms = [int]$picoHealth.min_slot_interval_ms
+                measurement = "network_rtt_and_host_to_hid_ack"
+            }
         }
         source_identities = $identities
         tailscale = [ordered]@{
@@ -332,9 +349,9 @@ try {
             $identity.capture_physical_expected.w, $identity.capture_physical_expected.h, $identity.aspect)
     }
     Write-Host "iOS app host: https://$tailscaleDnsName"
-    Write-Host "iOS pairing token: $inputToken"
+    Write-Host "iOS pairing token: $(if ($DisableInput) { '<disabled>' } else { $inputToken })"
     Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
-    Write-Host "Pico input: $($picoHealth.report_mode) on $($picoHealth.port)"
+    Write-Host "Pico input: $(if ($DisableInput) { 'disabled for stream-only test' } else { "$($picoHealth.report_mode) on $($picoHealth.port)" })"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
     Write-Host "WHEP slot 1: https://$tailscaleDnsName/oplink-whep/slot01/whep"
     Write-Host "WHEP slot 15: https://$tailscaleDnsName/oplink-whep/slot15/whep"

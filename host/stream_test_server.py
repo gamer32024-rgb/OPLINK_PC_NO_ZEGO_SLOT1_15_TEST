@@ -217,7 +217,7 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
         "generated_at_ms": int(time.time() * 1000),
         "profile": state.get(
             "profile",
-            {"encoded": {"w": 1280, "h": 720}, "fps": 30, "bitrate_kbps": 4000},
+            {"encoded": {"w": 1920, "h": 1080}, "fps": 30, "bitrate_kbps": 6000},
         ),
         "encoder": state.get("encoder", "unknown"),
         "network_underlay": state.get("network_underlay", {}),
