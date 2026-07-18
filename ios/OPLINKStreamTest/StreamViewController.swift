@@ -8,8 +8,7 @@ final class StreamViewController: UIViewController {
     }
 
     private struct QueuedInput {
-        let slot: Int
-        let command: TouchOverlayView.Command
+        let request: StreamInputRequest
     }
 
     private let videoView = RTCMTLVideoView(frame: .zero)
@@ -29,6 +28,10 @@ final class StreamViewController: UIViewController {
     private let legacyControls = LegacyStreamControlsView()
     private let fixedRightRail = FixedRightRailView()
     private let inputToast = UILabel()
+    private let keyboardPanel = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    private let keyboardTextField = UITextField()
+    private let keyboardEnterButton = UIButton(type: .system)
+    private let keyboardBackspaceButton = UIButton(type: .system)
     private let streamAPI = StreamAPI()
     private let guiAPI = GUIBridgeAPI()
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
@@ -56,6 +59,8 @@ final class StreamViewController: UIViewController {
     private var bridgePlayingSlots = Set<Int>()
     private var bridgeSlotPlaybackStatus: [String: String] = [:]
     private var bridgeModules: [String: [String]] = [:]
+    private var bridgeModuleGroups: [GUIModuleGroup] = []
+    private var bridgeModulePresets: [GUIModuleChainPreset] = []
     private var bridgeHeartbeatFresh = false
     private var suppressTouchSequenceForControlCollapse = false
     private var controlCenterXConstraint: NSLayoutConstraint?
@@ -63,6 +68,12 @@ final class StreamViewController: UIViewController {
     private var controlDragStart = CGPoint.zero
     private var controlPositionReady = false
     private var inputToastTask: DispatchWorkItem?
+    private var keyboardFlushTask: DispatchWorkItem?
+    private var keyboardPanelCenterXConstraint: NSLayoutConstraint?
+    private var keyboardPanelCenterYConstraint: NSLayoutConstraint?
+    private var keyboardPanelWidthConstraint: NSLayoutConstraint?
+    private var keyboardPanelPositionReady = false
+    private var keyboardPanelDragStart = CGPoint.zero
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
@@ -90,6 +101,8 @@ final class StreamViewController: UIViewController {
             userInfo: nil,
             repeats: true
         )
+        keyboardTextField.delegate = self
+        keyboardTextField.addTarget(self, action: #selector(keyboardTextChanged), for: .editingChanged)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -107,11 +120,15 @@ final class StreamViewController: UIViewController {
         super.viewDidLayoutSubviews()
         positionLegacyControlsIfNeeded()
         clampLegacyControls(save: false)
+        positionKeyboardPanelIfNeeded()
+        updateKeyboardPanelWidth()
+        clampKeyboardPanel(save: false)
     }
 
     deinit {
         metricsTimer?.invalidate()
         bridgeTimer?.invalidate()
+        keyboardFlushTask?.cancel()
         whepClient.stop()
     }
 
@@ -142,6 +159,7 @@ final class StreamViewController: UIViewController {
         guiPanel.isHidden = true
         view.addSubview(guiPanel)
         buildLegacyControls()
+        buildKeyboardPanel()
         buildInputToast()
         NSLayoutConstraint.activate([
             streamSlotPicker.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 4),
@@ -168,12 +186,79 @@ final class StreamViewController: UIViewController {
             centerX,
             centerY,
             fixedRightRail.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            fixedRightRail.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: 78)
+            fixedRightRail.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
         ])
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handleLegacyControlPan(_:)))
         pan.cancelsTouchesInView = false
         legacyControls.addGestureRecognizer(pan)
+    }
+
+    private func buildKeyboardPanel() {
+        keyboardPanel.translatesAutoresizingMaskIntoConstraints = false
+        keyboardPanel.layer.cornerRadius = 8
+        keyboardPanel.layer.masksToBounds = true
+        keyboardPanel.isHidden = true
+        view.addSubview(keyboardPanel)
+
+        keyboardTextField.translatesAutoresizingMaskIntoConstraints = false
+        keyboardTextField.borderStyle = .none
+        keyboardTextField.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+        keyboardTextField.textColor = .white
+        keyboardTextField.tintColor = .systemGreen
+        keyboardTextField.returnKeyType = .send
+        keyboardTextField.autocorrectionType = .no
+        keyboardTextField.autocapitalizationType = .none
+        keyboardTextField.layer.cornerRadius = 6
+        keyboardTextField.layer.masksToBounds = true
+        keyboardTextField.attributedPlaceholder = NSAttributedString(
+            string: "Text",
+            attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.55)]
+        )
+
+        configureKeyboardIcon(keyboardEnterButton, systemName: "return", label: "Enter")
+        configureKeyboardIcon(keyboardBackspaceButton, systemName: "delete.left.fill", label: "Backspace")
+        keyboardEnterButton.addTarget(self, action: #selector(sendKeyboardEnter), for: .touchUpInside)
+        keyboardBackspaceButton.addTarget(self, action: #selector(sendKeyboardBackspace), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [keyboardTextField, keyboardEnterButton, keyboardBackspaceButton])
+        stack.axis = .horizontal
+        stack.spacing = 6
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        keyboardPanel.contentView.addSubview(stack)
+
+        let centerX = keyboardPanel.centerXAnchor.constraint(equalTo: view.leadingAnchor)
+        let centerY = keyboardPanel.centerYAnchor.constraint(equalTo: view.topAnchor)
+        let width = keyboardPanel.widthAnchor.constraint(equalToConstant: 480)
+        keyboardPanelCenterXConstraint = centerX
+        keyboardPanelCenterYConstraint = centerY
+        keyboardPanelWidthConstraint = width
+
+        NSLayoutConstraint.activate([
+            centerX,
+            centerY,
+            width,
+            keyboardPanel.heightAnchor.constraint(equalToConstant: 40),
+            stack.leadingAnchor.constraint(equalTo: keyboardPanel.contentView.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: keyboardPanel.contentView.trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: keyboardPanel.contentView.topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: keyboardPanel.contentView.bottomAnchor, constant: -6),
+            keyboardEnterButton.widthAnchor.constraint(equalToConstant: 34),
+            keyboardBackspaceButton.widthAnchor.constraint(equalToConstant: 34)
+        ])
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleKeyboardPanelPan(_:)))
+        pan.cancelsTouchesInView = false
+        keyboardPanel.addGestureRecognizer(pan)
+    }
+
+    private func configureKeyboardIcon(_ button: UIButton, systemName: String, label: String) {
+        button.setImage(UIImage(systemName: systemName), for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor.white.withAlphaComponent(0.25)
+        button.layer.cornerRadius = 6
+        button.accessibilityLabel = label
     }
 
     private func buildInputToast() {
@@ -255,6 +340,71 @@ final class StreamViewController: UIViewController {
         if save {
             UserDefaults.standard.set(centerX.constant / view.bounds.width, forKey: "oplink.pc.control.xRatio")
             UserDefaults.standard.set(centerY.constant / view.bounds.height, forKey: "oplink.pc.control.yRatio")
+        }
+    }
+
+    private func positionKeyboardPanelIfNeeded() {
+        guard !keyboardPanelPositionReady,
+              view.bounds.width > 0,
+              view.bounds.height > 0,
+              let centerX = keyboardPanelCenterXConstraint,
+              let centerY = keyboardPanelCenterYConstraint else { return }
+        let savedX = UserDefaults.standard.object(forKey: "oplink.pc.keyboard.xRatio") as? Double
+        let savedY = UserDefaults.standard.object(forKey: "oplink.pc.keyboard.yRatio") as? Double
+        if let savedX, let savedY {
+            centerX.constant = CGFloat(savedX) * view.bounds.width
+            centerY.constant = CGFloat(savedY) * view.bounds.height
+        } else {
+            let safe = view.safeAreaLayoutGuide.layoutFrame
+            centerX.constant = safe.midX
+            centerY.constant = safe.minY + 34
+        }
+        keyboardPanelPositionReady = true
+    }
+
+    private func updateKeyboardPanelWidth() {
+        guard let width = keyboardPanelWidthConstraint else { return }
+        let safeWidth = view.safeAreaLayoutGuide.layoutFrame.width
+        guard safeWidth > 0 else { return }
+        width.constant = max(260, min(520, floor(safeWidth * 0.75)))
+    }
+
+    @objc private func handleKeyboardPanelPan(_ gesture: UIPanGestureRecognizer) {
+        guard let centerX = keyboardPanelCenterXConstraint,
+              let centerY = keyboardPanelCenterYConstraint else { return }
+        switch gesture.state {
+        case .began:
+            keyboardPanelDragStart = CGPoint(x: centerX.constant, y: centerY.constant)
+            keyboardPanel.layer.borderWidth = 1
+            keyboardPanel.layer.borderColor = UIColor.systemGreen.withAlphaComponent(0.65).cgColor
+        case .changed:
+            let translation = gesture.translation(in: view)
+            centerX.constant = keyboardPanelDragStart.x + translation.x
+            centerY.constant = keyboardPanelDragStart.y + translation.y
+            clampKeyboardPanel(save: false)
+        case .ended, .cancelled, .failed:
+            clampKeyboardPanel(save: true)
+            keyboardPanel.layer.borderWidth = 0
+            keyboardPanel.layer.borderColor = nil
+        default:
+            break
+        }
+    }
+
+    private func clampKeyboardPanel(save: Bool) {
+        guard keyboardPanelPositionReady,
+              let centerX = keyboardPanelCenterXConstraint,
+              let centerY = keyboardPanelCenterYConstraint,
+              view.bounds.width > 0,
+              view.bounds.height > 0 else { return }
+        let safe = view.safeAreaLayoutGuide.layoutFrame
+        let halfWidth = max(1, keyboardPanel.bounds.width / 2)
+        let halfHeight = max(1, keyboardPanel.bounds.height / 2)
+        centerX.constant = min(max(centerX.constant, safe.minX + halfWidth), safe.maxX - halfWidth)
+        centerY.constant = min(max(centerY.constant, safe.minY + halfHeight), safe.maxY - halfHeight)
+        if save {
+            UserDefaults.standard.set(centerX.constant / view.bounds.width, forKey: "oplink.pc.keyboard.xRatio")
+            UserDefaults.standard.set(centerY.constant / view.bounds.height, forKey: "oplink.pc.keyboard.yRatio")
         }
     }
 
@@ -445,7 +595,7 @@ final class StreamViewController: UIViewController {
             self?.clampLegacyControls(save: false)
         }
         fixedRightRail.onControlPanel = { [weak self] in self?.showGUIPanel() }
-        fixedRightRail.onKeyboard = { [weak self] in self?.showKeyboardStatus() }
+        fixedRightRail.onKeyboard = { [weak self] in self?.toggleKeyboardPanel() }
 
         guiPanel.onClose = { [weak self] in self?.guiPanel.isHidden = true }
         guiPanel.onRefresh = { [weak self] in self?.refreshGUIBridgeState() }
@@ -454,6 +604,9 @@ final class StreamViewController: UIViewController {
         guiPanel.onStopSlot = { [weak self] slot in self?.sendStopSlot(slot) }
         guiPanel.onLauncher = { [weak self] action, slots in self?.sendLauncher(action: action, slots: slots) }
         guiPanel.onArrange = { [weak self] slots in self?.sendArrange(slots: slots) }
+        guiPanel.onRequestPresetSave = { [weak self] index, currentName, modules in
+            self?.promptPresetName(index: index, currentName: currentName, modules: modules)
+        }
     }
 
     @objc private func previousSlotTapped() {
@@ -475,19 +628,83 @@ final class StreamViewController: UIViewController {
 
     @objc private func showGUIPanel() {
         collapseLegacyControls()
+        closeKeyboardPanel()
+        guiPanel.prepareForPresentation(streamSlot: selectedSlot)
         guiPanel.isHidden = false
         view.bringSubviewToFront(guiPanel)
         refreshGUIBridgeState()
     }
 
-    private func showKeyboardStatus() {
-        let alert = UIAlertController(
-            title: "Keyboard",
-            message: "The keyboard control is in the accepted position. This touch build does not substitute Windows virtual keyboard input for Pico HID.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+    private func toggleKeyboardPanel() {
+        if keyboardPanel.isHidden {
+            collapseLegacyControls()
+            guiPanel.isHidden = true
+            keyboardPanel.isHidden = false
+            view.bringSubviewToFront(keyboardPanel)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+                self?.keyboardTextField.becomeFirstResponder()
+            }
+        } else {
+            closeKeyboardPanel()
+        }
+    }
+
+    private func closeKeyboardPanel() {
+        keyboardFlushTask?.cancel()
+        keyboardFlushTask = nil
+        keyboardTextField.text = ""
+        keyboardTextField.resignFirstResponder()
+        keyboardPanel.isHidden = true
+    }
+
+    private func keyboardFlushDelay(for text: String) -> TimeInterval {
+        if text.unicodeScalars.contains(where: { !$0.isASCII }) { return 0.08 }
+        if text.count <= 16,
+           text.range(of: #"^[A-Za-z0-9']+$"#, options: .regularExpression) != nil {
+            return 1.6
+        }
+        return 0.36
+    }
+
+    @objc private func keyboardTextChanged() {
+        scheduleKeyboardFlush()
+    }
+
+    private func scheduleKeyboardFlush() {
+        keyboardFlushTask?.cancel()
+        guard let text = keyboardTextField.text, !text.isEmpty else { return }
+        let task = DispatchWorkItem { [weak self] in
+            self?.sendKeyboardFieldPayload(sendEnter: false, cancelPending: false)
+        }
+        keyboardFlushTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + keyboardFlushDelay(for: text), execute: task)
+    }
+
+    @objc private func sendKeyboardEnter() {
+        sendKeyboardFieldPayload(sendEnter: true)
+    }
+
+    @objc private func sendKeyboardBackspace() {
+        enqueueKeyboardKey("backspace")
+    }
+
+    private func sendKeyboardFieldPayload(sendEnter: Bool, cancelPending: Bool = true) {
+        if cancelPending {
+            keyboardFlushTask?.cancel()
+        }
+        keyboardFlushTask = nil
+        if keyboardTextField.markedTextRange != nil {
+            scheduleKeyboardFlush()
+            return
+        }
+        let text = keyboardTextField.text ?? ""
+        if !text.isEmpty {
+            keyboardTextField.text = ""
+            enqueueKeyboardText(text)
+        }
+        if sendEnter {
+            enqueueKeyboardKey("enter")
+        }
     }
 
     private func adjacentAvailableSlot(step: Int) -> Int {
@@ -651,12 +868,28 @@ final class StreamViewController: UIViewController {
     }
 
     private func enqueueInput(_ command: TouchOverlayView.Command) {
+        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
+        enqueueRemoteInput(.touch(slot: selectedSlot, command: command, sentAtMs: sentAt))
+    }
+
+    private func enqueueKeyboardText(_ text: String) {
+        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
+        enqueueRemoteInput(.text(slot: selectedSlot, value: text, sentAtMs: sentAt))
+    }
+
+    private func enqueueKeyboardKey(_ key: String) {
+        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
+        enqueueRemoteInput(.key(slot: selectedSlot, value: key, sentAtMs: sentAt))
+    }
+
+    private func enqueueRemoteInput(_ request: StreamInputRequest) {
         guard configuredBaseURL() != nil, configuredInputToken() != nil else {
-            setStatus("尚未設定可選的 input pairing token", good: false)
+            setStatus("尚未設定 input pairing token", good: false)
+            presentHostSettings()
             return
         }
-        let item = QueuedInput(slot: selectedSlot, command: command)
-        if command.action == "move", inputQueue.last?.command.action == "move" {
+        let item = QueuedInput(request: request)
+        if request.action == "move", inputQueue.last?.request.action == "move" {
             inputQueue[inputQueue.count - 1] = item
         } else {
             inputQueue.append(item)
@@ -670,17 +903,8 @@ final class StreamViewController: UIViewController {
               let token = configuredInputToken() else { return }
         inputInFlight = true
         let queued = inputQueue.removeFirst()
-        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
-        let request = StreamInputRequest(
-            slot: queued.slot,
-            action: queued.command.action,
-            x: queued.command.x,
-            y: queued.command.y,
-            pointerID: 0,
-            clientSentAtMs: sentAt
-        )
         let requestStartedAt = Date()
-        streamAPI.sendInput(baseURL: baseURL, token: token, input: request) { [weak self] result in
+        streamAPI.sendInput(baseURL: baseURL, token: token, input: queued.request) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inputInFlight = false
@@ -703,6 +927,14 @@ final class StreamViewController: UIViewController {
                     self.inputQueue.removeAll()
                     self.setStatus(error.localizedDescription, good: false)
                     self.showInputToast(error.localizedDescription, good: false)
+                    if let inputError = error as? StreamInputError,
+                       inputError.isInvalidPairingToken {
+                        UserDefaults.standard.removeObject(forKey: Defaults.inputToken)
+                        self.closeKeyboardPanel()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                            self?.presentHostSettings(clearToken: true)
+                        }
+                    }
                 }
                 self.drainInputQueue()
             }
@@ -743,6 +975,33 @@ final class StreamViewController: UIViewController {
             }
         }
 
+        guiAPI.fetchModuleGroups(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.bridgeModuleGroups = response.groups
+                    self.applyGUIBridgeState()
+                case .failure(let error):
+                    self.bridgeModuleGroups = []
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+
+        guiAPI.fetchModuleChainPresets(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.bridgeModulePresets = response.presets
+                    self.applyGUIBridgeState()
+                case .failure(let error):
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+
         guiAPI.fetchJobs(baseURL: baseURL) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -776,8 +1035,57 @@ final class StreamViewController: UIViewController {
             playingSlots: bridgePlayingSlots,
             slotPlaybackStatus: bridgeSlotPlaybackStatus,
             modules: bridgeModules,
+            groups: bridgeModuleGroups,
+            presets: bridgeModulePresets,
             heartbeatFresh: bridgeHeartbeatFresh
         )
+    }
+
+    private func promptPresetName(index: Int, currentName: String, modules: [String]) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(
+            title: "儲存連串 \(index)",
+            message: modules.joined(separator: " > "),
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.text = currentName
+            field.placeholder = "連串名稱"
+            field.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "儲存", style: .default) { [weak self, weak alert] _ in
+            guard let self else { return }
+            let name = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            self.savePreset(index: index, name: name, modules: modules)
+        })
+        present(alert, animated: true)
+    }
+
+    private func savePreset(index: Int, name: String, modules: [String]) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guard !name.isEmpty else {
+            guiPanel.setStatus("連串名稱不可留空。", good: false)
+            return
+        }
+        guiAPI.saveModuleChainPreset(
+            baseURL: baseURL,
+            index: index,
+            name: name,
+            modules: modules
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.bridgeModulePresets = response.presets
+                    self.guiPanel.finishPresetSave(response.presets)
+                    self.guiPanel.setStatus("連串 \(index) 已儲存：\(response.preset.name)", good: true)
+                case .failure(let error):
+                    self.guiPanel.setStatus(error.localizedDescription, good: false)
+                }
+            }
+        }
     }
 
     private func sendModuleChain(slots: [Int], modules: [String]) {
@@ -858,10 +1166,16 @@ final class StreamViewController: UIViewController {
     }
 
     @objc private func presentHostSettings() {
+        presentHostSettings(clearToken: false)
+    }
+
+    private func presentHostSettings(clearToken: Bool) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "Tailnet Windows 主機",
-            message: "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 只供即時觸控，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
+            message: clearToken
+                ? "Input pairing token 已失效。請輸入 Windows 串流主機目前顯示的 token；不要輸入 Tailscale auth key。"
+                : "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 供即時觸控與鍵盤使用，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -873,7 +1187,7 @@ final class StreamViewController: UIViewController {
         }
         alert.addTextField { field in
             field.placeholder = "Input pairing token（可留空）"
-            field.text = UserDefaults.standard.string(forKey: Defaults.inputToken)
+            field.text = clearToken ? "" : UserDefaults.standard.string(forKey: Defaults.inputToken)
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
         }
@@ -903,5 +1217,33 @@ final class StreamViewController: UIViewController {
         guard #available(iOS 16.0, *), let scene = view.window?.windowScene else { return }
         setNeedsUpdateOfSupportedInterfaceOrientations()
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+    }
+}
+
+extension StreamViewController: UITextFieldDelegate {
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        guard textField === keyboardTextField else { return }
+        keyboardFlushTask?.cancel()
+        keyboardFlushTask = nil
+        keyboardTextField.text = ""
+        keyboardPanel.isHidden = true
+    }
+
+    func textField(
+        _ textField: UITextField,
+        shouldChangeCharactersIn range: NSRange,
+        replacementString string: String
+    ) -> Bool {
+        guard textField === keyboardTextField else { return true }
+        if string.isEmpty, range.length == 0, (textField.text ?? "").isEmpty {
+            enqueueKeyboardKey("backspace")
+        }
+        return true
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        guard textField === keyboardTextField else { return true }
+        sendKeyboardFieldPayload(sendEnter: true)
+        return true
     }
 }

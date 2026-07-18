@@ -46,7 +46,10 @@ final class StreamAPI {
             }
             guard (200..<300).contains(http.statusCode) else {
                 let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                completion(.failure(StreamInputError.rejected(message ?? "Activate failed: HTTP \(http.statusCode)")))
+                completion(.failure(StreamInputError.rejected(
+                    statusCode: http.statusCode,
+                    message: message ?? "Activate failed: HTTP \(http.statusCode)"
+                )))
                 return
             }
             do {
@@ -84,7 +87,10 @@ final class StreamAPI {
                 return
             }
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            completion(.failure(StreamInputError.rejected(message ?? "Input request failed: HTTP \(http.statusCode)")))
+            completion(.failure(StreamInputError.rejected(
+                statusCode: http.statusCode,
+                message: message ?? "Input request failed: HTTP \(http.statusCode)"
+            )))
         }.resume()
     }
 }

@@ -17,6 +17,31 @@ struct GUIModulesResponse: Decodable {
     let modules: [String: [String]]
 }
 
+struct GUIModuleGroup: Decodable {
+    let name: String
+    let modules: [String]
+}
+
+struct GUIModuleGroupsResponse: Decodable {
+    let groups: [GUIModuleGroup]
+}
+
+struct GUIModuleChainPreset: Codable {
+    let index: Int
+    let name: String
+    let modules: [String]
+}
+
+struct GUIModuleChainPresetsResponse: Decodable {
+    let presets: [GUIModuleChainPreset]
+}
+
+struct GUIModuleChainPresetSaveResponse: Decodable {
+    let ok: Bool
+    let preset: GUIModuleChainPreset
+    let presets: [GUIModuleChainPreset]
+}
+
 struct GUIJobsResponse: Decodable {
     let jobs: [GUIBridgeJob]
     let gui: GUIHeartbeat?
@@ -96,6 +121,11 @@ struct GUIModuleChainRequest: Encodable {
     let modules: [String]
 }
 
+struct GUIModuleChainPresetSaveRequest: Encodable {
+    let name: String
+    let modules: [String]
+}
+
 struct GUISlotRequest: Encodable {
     let slot: Int
 }
@@ -125,6 +155,18 @@ enum GUIBridgeEndpoint {
 
     static func modules(base: URL) -> URL {
         StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/modules")
+    }
+
+    static func moduleGroups(base: URL) -> URL {
+        StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/module-groups")
+    }
+
+    static func moduleChainPresets(base: URL) -> URL {
+        StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/module-chain-presets")
+    }
+
+    static func moduleChainPreset(base: URL, index: Int) -> URL {
+        StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/module-chain-presets/\(index)")
     }
 
     static func jobs(base: URL) -> URL {

@@ -22,6 +22,8 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 
 The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows stops the old exact-HWND publisher, starts the new one, waits until its MediaMTX path is online, and then returns success.
 
+Live game taps and drags remain Pico HID touchscreen reports through GUI_TEST_PC. The legacy-style iOS keyboard panel uses authenticated `text` and `key` messages, then GUI_TEST_PC activates the selected slot and sends Windows keyboard input. Keyboard support never changes touch input to mouse fallback.
+
 This design is required on the current host. A live 15-publisher trial reached the NVIDIA hardware-session ceiling after eight sessions, while 15 concurrent `libx264` publishers could not maintain 30 fps. The single-active publisher keeps the correct observation behavior during GUI_TEST_PC playback without wasting 15 encoder sessions.
 
 Measured locally on 2026-07-18:
@@ -39,6 +41,7 @@ Prerequisites:
 
 - All 15 game windows are running and registered in the GUI_TEST_PC PID map.
 - Every source is 16:9 and accepted by the active GUI_TEST_PC layout policy.
+- The input pairing token is retained across normal host restarts. Use `-RotateInputToken` only when intentionally invalidating paired clients.
 - Tailscale is connected on Windows and iPhone.
 - FFmpeg includes the `gfxcapture` filter.
 - MediaMTX is available at `host/tools/mediamtx/mediamtx.exe`, or passed with `-MediaMTXPath`.

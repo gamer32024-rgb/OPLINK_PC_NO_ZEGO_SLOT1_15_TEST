@@ -17,6 +17,34 @@ final class GUIBridgeAPI {
         get(GUIBridgeEndpoint.modules(base: baseURL), completion: completion)
     }
 
+    func fetchModuleGroups(
+        baseURL: URL,
+        completion: @escaping (Result<GUIModuleGroupsResponse, Error>) -> Void
+    ) {
+        get(GUIBridgeEndpoint.moduleGroups(base: baseURL), completion: completion)
+    }
+
+    func fetchModuleChainPresets(
+        baseURL: URL,
+        completion: @escaping (Result<GUIModuleChainPresetsResponse, Error>) -> Void
+    ) {
+        get(GUIBridgeEndpoint.moduleChainPresets(base: baseURL), completion: completion)
+    }
+
+    func saveModuleChainPreset(
+        baseURL: URL,
+        index: Int,
+        name: String,
+        modules: [String],
+        completion: @escaping (Result<GUIModuleChainPresetSaveResponse, Error>) -> Void
+    ) {
+        post(
+            GUIBridgeEndpoint.moduleChainPreset(base: baseURL, index: index),
+            body: GUIModuleChainPresetSaveRequest(name: name, modules: modules),
+            completion: completion
+        )
+    }
+
     func fetchJobs(baseURL: URL, completion: @escaping (Result<GUIJobsResponse, Error>) -> Void) {
         get(GUIBridgeEndpoint.jobs(base: baseURL), completion: completion)
     }

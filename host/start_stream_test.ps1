@@ -21,6 +21,7 @@ param(
     [switch]$AllowVpnDefaultRoute,
     [switch]$DisableInput,
     [switch]$DirectPicoInput,
+    [switch]$RotateInputToken,
     [ValidateRange(1024, 65535)]
     [int]$GuiTestPcLiveInputPort = 5111,
     [switch]$Restart
@@ -245,12 +246,17 @@ $picoHealth = $null
 if ($inputMode -eq "disabled") {
     if (Test-Path -LiteralPath $inputTokenPath) { Remove-Item -LiteralPath $inputTokenPath -Force }
 } else {
-    $tokenBytes = New-Object byte[] 24
-    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $random.GetBytes($tokenBytes)
-    $random.Dispose()
-    $inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
-    [System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
+    if (!$RotateInputToken -and (Test-Path -LiteralPath $inputTokenPath -PathType Leaf)) {
+        $inputToken = (Get-Content -LiteralPath $inputTokenPath -Raw -Encoding UTF8).Trim()
+    }
+    if (!$inputToken) {
+        $tokenBytes = New-Object byte[] 24
+        $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $random.GetBytes($tokenBytes)
+        $random.Dispose()
+        $inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+        [System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
+    }
     if ($inputMode -eq "direct") {
         $picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
         if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }

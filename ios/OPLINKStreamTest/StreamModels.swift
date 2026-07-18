@@ -56,15 +56,56 @@ struct StreamInputInfo: Decodable {
 struct StreamInputRequest: Encodable {
     let slot: Int
     let action: String
-    let x: Double
-    let y: Double
-    let pointerID: Int
+    let x: Double?
+    let y: Double?
+    let pointerID: Int?
+    let text: String?
+    let key: String?
     let clientSentAtMs: Int64
 
     enum CodingKeys: String, CodingKey {
-        case slot, action, x, y
+        case slot, action, x, y, text, key
         case pointerID = "pointer_id"
         case clientSentAtMs = "client_sent_at_ms"
+    }
+
+    static func touch(slot: Int, command: TouchOverlayView.Command, sentAtMs: Int64) -> StreamInputRequest {
+        StreamInputRequest(
+            slot: slot,
+            action: command.action,
+            x: command.x,
+            y: command.y,
+            pointerID: 0,
+            text: nil,
+            key: nil,
+            clientSentAtMs: sentAtMs
+        )
+    }
+
+    static func text(slot: Int, value: String, sentAtMs: Int64) -> StreamInputRequest {
+        StreamInputRequest(
+            slot: slot,
+            action: "text",
+            x: nil,
+            y: nil,
+            pointerID: nil,
+            text: value,
+            key: nil,
+            clientSentAtMs: sentAtMs
+        )
+    }
+
+    static func key(slot: Int, value: String, sentAtMs: Int64) -> StreamInputRequest {
+        StreamInputRequest(
+            slot: slot,
+            action: "key",
+            x: nil,
+            y: nil,
+            pointerID: nil,
+            text: nil,
+            key: value,
+            clientSentAtMs: sentAtMs
+        )
     }
 }
 
@@ -202,11 +243,16 @@ enum StreamConfigurationError: LocalizedError {
 }
 
 enum StreamInputError: LocalizedError {
-    case rejected(String)
+    case rejected(statusCode: Int, message: String)
+
+    var isInvalidPairingToken: Bool {
+        if case .rejected(let statusCode, _) = self { return statusCode == 401 }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
-        case .rejected(let message): return message
+        case .rejected(_, let message): return message
         }
     }
 }
