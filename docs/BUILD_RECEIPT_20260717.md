@@ -4,26 +4,26 @@
 
 - Repository: `gamer32024-rgb/OPLINK_PC_NO_ZEGO_SLOT1_15_TEST`
 - Workflow: `Build unsigned IPA`
-- Run: `29563093515`
-- Source commit: `d121f0ca581257fe12149496ecd5476e91023a21`
+- Run: `29645674944`
+- Source commit: `f1b0a5d77cde34360bc8e521a2ce7f2e573d6c72`
 - Result: success
-- Duration: 55 seconds
+- Duration: 58 seconds
 - Artifact: `OPLINKStreamTest-unsigned`
-- Artifact ID: `8400039670`
+- Artifact ID: `8429962547`
 - Artifact ZIP size shown by GitHub: 5.41 MB
-- Artifact digest shown by GitHub: `sha256:2b54a17b5902b524e0991293787da009afcf7bd58221a43555f6f82a967d4f5b`
+- Artifact digest shown by GitHub: `sha256:423f4d8f848f4168c672925e6d97597494b1cd1fbc8568c034b09093e54511ef`
 
 Run URL:
 
 ```text
-https://github.com/gamer32024-rgb/OPLINK_PC_NO_ZEGO_SLOT1_15_TEST/actions/runs/29563093515
+https://github.com/gamer32024-rgb/OPLINK_PC_NO_ZEGO_SLOT1_15_TEST/actions/runs/29645674944
 ```
 
 ## Downloaded IPA
 
-- Local file: `dist/OPLINKStreamTest-unsigned-run3.ipa`
-- Size: 5,682,306 bytes
-- SHA-256: `4E90635E326845351C8D4BFCFE7499A16F5D3D7A13EE96431804318626B7723A`
+- Local file: `dist/OPLINKStreamTest-1080p30-v0.2.0.ipa`
+- Size: 5,682,295 bytes
+- SHA-256: `9F3D790E22C3C059A6A611690BFA91AFFC2F67B4262DB582319807222ED95D99`
 - Contains: `Payload/OPLINKStreamTest.app`, app executable, `Info.plist`, and `WebRTC.framework`
 - Code signature: absent by design
 
