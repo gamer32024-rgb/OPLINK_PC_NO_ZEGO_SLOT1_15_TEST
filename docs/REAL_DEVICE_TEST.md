@@ -31,7 +31,7 @@ Record the app overlay values for every run:
 ## Acceptance
 
 - Both sources fill the same maximum 16:9 area without crop, stretch, or desktop content.
-- Rendered resolution is 1280x720 for both slots.
+- Rendered resolution is 1920x1080 for both slots.
 - Rendered FPS remains at least 29 fps during each 30-second observation.
 - Every switch renders the first frame within 1000 ms.
 - No freeze lasts longer than 300 ms in the observation period.
