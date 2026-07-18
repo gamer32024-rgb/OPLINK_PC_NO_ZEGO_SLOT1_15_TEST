@@ -9,20 +9,24 @@ final class StreamViewController: UIViewController {
 
     private struct QueuedInput {
         let command: TouchOverlayView.Command
-        let enqueuedAt: Date
     }
 
     private let videoView = RTCMTLVideoView(frame: .zero)
     private let touchOverlay = TouchOverlayView(frame: .zero)
     private let chrome = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
-    private let slot1Button = UIButton(type: .system)
-    private let slot15Button = UIButton(type: .system)
+    private let previousButton = UIButton(type: .system)
+    private let currentSlotButton = UIButton(type: .system)
+    private let nextButton = UIButton(type: .system)
+    private let guiButton = UIButton(type: .system)
     private let settingsButton = UIButton(type: .system)
     private let statusLabel = UILabel()
     private let sourceLabel = UILabel()
     private let metricsLabel = UILabel()
     private let targetLabel = UILabel()
-    private let api = StreamAPI()
+    private let streamSlotPicker = StreamSlotPickerView(frame: .zero)
+    private let guiPanel = GUIControlPanelView(frame: .zero)
+    private let streamAPI = StreamAPI()
+    private let guiAPI = GUIBridgeAPI()
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
     private lazy var whepClient = WHEPClient()
 
@@ -30,15 +34,24 @@ final class StreamViewController: UIViewController {
     private var connectionSequence = 0
     private var switchStartedAt: Date?
     private var latestResponse: StreamSourcesResponse?
+    private var availableStreamSlots = Set<Int>(1...15)
     private var renderedSize = CGSize.zero
     private var renderedFPS = 0
     private var lastSwitchMilliseconds: Int?
     private var lastInputRTTMilliseconds: Int?
     private var lastHostToHIDMilliseconds: Double?
-    private var lastInputBackend = "--"
+    private var lastInputBackend = "disabled"
     private var inputQueue: [QueuedInput] = []
     private var inputInFlight = false
     private var metricsTimer: Timer?
+    private var bridgeTimer: Timer?
+
+    private var bridgeTargetRunningSlots = Set<Int>()
+    private var bridgeHeartbeatRunningSlots = Set<Int>()
+    private var bridgePlayingSlots = Set<Int>()
+    private var bridgeSlotPlaybackStatus: [String: String] = [:]
+    private var bridgeModules: [String: [String]] = [:]
+    private var bridgeHeartbeatFresh = false
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
@@ -50,12 +63,19 @@ final class StreamViewController: UIViewController {
         view.backgroundColor = UIColor(red: 0.015, green: 0.035, blue: 0.04, alpha: 1)
         buildLayout()
         configureCallbacks()
-        refreshButtonState()
+        refreshStreamControls()
         updateMetrics()
         metricsTimer = Timer.scheduledTimer(
             timeInterval: 1,
             target: self,
             selector: #selector(sampleRenderedFrames),
+            userInfo: nil,
+            repeats: true
+        )
+        bridgeTimer = Timer.scheduledTimer(
+            timeInterval: 3,
+            target: self,
+            selector: #selector(periodicBridgeRefresh),
             userInfo: nil,
             repeats: true
         )
@@ -66,6 +86,7 @@ final class StreamViewController: UIViewController {
         requestLandscape()
         if configuredBaseURL() != nil {
             connect(slot: selectedSlot)
+            refreshGUIBridgeState()
         } else {
             presentHostSettings()
         }
@@ -73,6 +94,7 @@ final class StreamViewController: UIViewController {
 
     deinit {
         metricsTimer?.invalidate()
+        bridgeTimer?.invalidate()
         whepClient.stop()
     }
 
@@ -81,6 +103,7 @@ final class StreamViewController: UIViewController {
         videoView.videoContentMode = .scaleAspectFit
         videoView.backgroundColor = .black
         view.addSubview(videoView)
+
         touchOverlay.translatesAutoresizingMaskIntoConstraints = false
         touchOverlay.isUserInteractionEnabled = false
         view.addSubview(touchOverlay)
@@ -95,65 +118,103 @@ final class StreamViewController: UIViewController {
             touchOverlay.bottomAnchor.constraint(equalTo: videoView.bottomAnchor)
         ])
 
+        buildTopChrome()
+        buildMetricsPanel()
+
+        streamSlotPicker.translatesAutoresizingMaskIntoConstraints = false
+        streamSlotPicker.isHidden = true
+        view.addSubview(streamSlotPicker)
+        guiPanel.translatesAutoresizingMaskIntoConstraints = false
+        guiPanel.isHidden = true
+        view.addSubview(guiPanel)
+        NSLayoutConstraint.activate([
+            streamSlotPicker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            streamSlotPicker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            streamSlotPicker.topAnchor.constraint(equalTo: view.topAnchor),
+            streamSlotPicker.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            guiPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            guiPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            guiPanel.topAnchor.constraint(equalTo: view.topAnchor),
+            guiPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func buildTopChrome() {
         chrome.translatesAutoresizingMaskIntoConstraints = false
-        chrome.layer.cornerRadius = 16
+        chrome.layer.cornerRadius = 15
         chrome.clipsToBounds = true
         view.addSubview(chrome)
 
-        let slotStack = UIStackView(arrangedSubviews: [slot1Button, slot15Button])
-        slotStack.axis = .horizontal
-        slotStack.spacing = 8
-        slotStack.distribution = .fillEqually
-        configureSlotButton(slot1Button, title: "EXE 1", action: #selector(selectSlot1))
-        configureSlotButton(slot15Button, title: "EXE 15", action: #selector(selectSlot15))
+        configureIconButton(previousButton, systemName: "chevron.left", label: "上一個遊戲")
+        previousButton.addTarget(self, action: #selector(previousSlotTapped), for: .touchUpInside)
+
+        currentSlotButton.setTitle("GAME 01", for: .normal)
+        currentSlotButton.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+        currentSlotButton.setTitleColor(UIColor(red: 0.04, green: 0.13, blue: 0.07, alpha: 1), for: .normal)
+        currentSlotButton.backgroundColor = UIColor(red: 0.54, green: 0.9, blue: 0.4, alpha: 0.94)
+        currentSlotButton.layer.cornerRadius = 10
+        currentSlotButton.addTarget(self, action: #selector(showStreamSlotPicker), for: .touchUpInside)
+        currentSlotButton.widthAnchor.constraint(equalToConstant: 86).isActive = true
+        currentSlotButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        configureIconButton(nextButton, systemName: "chevron.right", label: "下一個遊戲")
+        nextButton.addTarget(self, action: #selector(nextSlotTapped), for: .touchUpInside)
+
+        guiButton.setTitle("GUI", for: .normal)
+        guiButton.titleLabel?.font = .monospacedSystemFont(ofSize: 12, weight: .heavy)
+        guiButton.setTitleColor(.white, for: .normal)
+        guiButton.backgroundColor = UIColor(red: 0.08, green: 0.42, blue: 0.47, alpha: 0.95)
+        guiButton.layer.cornerRadius = 10
+        guiButton.accessibilityLabel = "開啟 GUI_TEST_PC 控制面板"
+        guiButton.addTarget(self, action: #selector(showGUIPanel), for: .touchUpInside)
+        guiButton.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        guiButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        configureIconButton(settingsButton, systemName: "network", label: "設定 Tailnet 主機")
+        settingsButton.addTarget(self, action: #selector(presentHostSettings), for: .touchUpInside)
+
+        let switchRow = UIStackView(arrangedSubviews: [previousButton, currentSlotButton, nextButton, guiButton])
+        switchRow.axis = .horizontal
+        switchRow.spacing = 7
+        switchRow.alignment = .center
 
         statusLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
         statusLabel.textColor = .white
         statusLabel.text = "未連線"
         statusLabel.numberOfLines = 1
 
-        sourceLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        sourceLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         sourceLabel.textColor = UIColor.white.withAlphaComponent(0.76)
         sourceLabel.numberOfLines = 2
-
-        settingsButton.setImage(UIImage(systemName: "network"), for: .normal)
-        settingsButton.tintColor = .white
-        settingsButton.backgroundColor = UIColor.white.withAlphaComponent(0.1)
-        settingsButton.layer.cornerRadius = 10
-        settingsButton.accessibilityLabel = "設定 Tailnet 主機"
-        settingsButton.addTarget(self, action: #selector(presentHostSettings), for: .touchUpInside)
-        settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            settingsButton.widthAnchor.constraint(equalToConstant: 40),
-            settingsButton.heightAnchor.constraint(equalToConstant: 40)
-        ])
 
         let textStack = UIStackView(arrangedSubviews: [statusLabel, sourceLabel])
         textStack.axis = .vertical
         textStack.spacing = 2
-        let topRow = UIStackView(arrangedSubviews: [slotStack, textStack, settingsButton])
+
+        let topRow = UIStackView(arrangedSubviews: [switchRow, textStack, settingsButton])
         topRow.axis = .horizontal
         topRow.alignment = .center
         topRow.spacing = 12
-        slotStack.widthAnchor.constraint(equalToConstant: 176).isActive = true
-
         chrome.contentView.addSubview(topRow)
         topRow.translatesAutoresizingMaskIntoConstraints = false
+
         NSLayoutConstraint.activate([
             chrome.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
             chrome.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            chrome.widthAnchor.constraint(lessThanOrEqualToConstant: 620),
+            chrome.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
             topRow.leadingAnchor.constraint(equalTo: chrome.contentView.leadingAnchor, constant: 10),
             topRow.trailingAnchor.constraint(equalTo: chrome.contentView.trailingAnchor, constant: -10),
             topRow.topAnchor.constraint(equalTo: chrome.contentView.topAnchor, constant: 8),
             topRow.bottomAnchor.constraint(equalTo: chrome.contentView.bottomAnchor, constant: -8)
         ])
+    }
 
-        let metricsPanel = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-        metricsPanel.translatesAutoresizingMaskIntoConstraints = false
-        metricsPanel.layer.cornerRadius = 13
-        metricsPanel.clipsToBounds = true
-        view.addSubview(metricsPanel)
+    private func buildMetricsPanel() {
+        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.layer.cornerRadius = 13
+        panel.clipsToBounds = true
+        view.addSubview(panel)
 
         metricsLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         metricsLabel.textColor = .white
@@ -162,26 +223,28 @@ final class StreamViewController: UIViewController {
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
         targetLabel.text = "TARGET 1080P / 30 FPS / SWITCH < 1000 MS / INPUT RTT < 300 MS"
 
-        let metricsStack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
-        metricsStack.axis = .vertical
-        metricsStack.spacing = 2
-        metricsPanel.contentView.addSubview(metricsStack)
-        metricsStack.translatesAutoresizingMaskIntoConstraints = false
+        let stack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
+        stack.axis = .vertical
+        stack.spacing = 2
+        panel.contentView.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            metricsPanel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
-            metricsPanel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            metricsStack.leadingAnchor.constraint(equalTo: metricsPanel.contentView.leadingAnchor, constant: 10),
-            metricsStack.trailingAnchor.constraint(equalTo: metricsPanel.contentView.trailingAnchor, constant: -10),
-            metricsStack.topAnchor.constraint(equalTo: metricsPanel.contentView.topAnchor, constant: 7),
-            metricsStack.bottomAnchor.constraint(equalTo: metricsPanel.contentView.bottomAnchor, constant: -7)
+            panel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
+            panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            stack.leadingAnchor.constraint(equalTo: panel.contentView.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: panel.contentView.topAnchor, constant: 7),
+            stack.bottomAnchor.constraint(equalTo: panel.contentView.bottomAnchor, constant: -7)
         ])
     }
 
-    private func configureSlotButton(_ button: UIButton, title: String, action: Selector) {
-        button.setTitle(title, for: .normal)
-        button.titleLabel?.font = .monospacedSystemFont(ofSize: 14, weight: .bold)
+    private func configureIconButton(_ button: UIButton, systemName: String, label: String) {
+        button.setImage(UIImage(systemName: systemName), for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor.white.withAlphaComponent(0.1)
         button.layer.cornerRadius = 10
-        button.addTarget(self, action: action, for: .touchUpInside)
+        button.accessibilityLabel = label
+        button.widthAnchor.constraint(equalToConstant: 40).isActive = true
         button.heightAnchor.constraint(equalToConstant: 40).isActive = true
     }
 
@@ -211,12 +274,53 @@ final class StreamViewController: UIViewController {
         touchOverlay.onCommand = { [weak self] command in
             self?.enqueueInput(command)
         }
+
+        streamSlotPicker.onClose = { [weak self] in self?.streamSlotPicker.isHidden = true }
+        streamSlotPicker.onSelectSlot = { [weak self] slot in
+            self?.streamSlotPicker.isHidden = true
+            self?.connect(slot: slot)
+        }
+
+        guiPanel.onClose = { [weak self] in self?.guiPanel.isHidden = true }
+        guiPanel.onRefresh = { [weak self] in self?.refreshGUIBridgeState() }
+        guiPanel.onPlay = { [weak self] slots, modules in self?.sendModuleChain(slots: slots, modules: modules) }
+        guiPanel.onStopAll = { [weak self] in self?.sendStopAll() }
+        guiPanel.onStopSlot = { [weak self] slot in self?.sendStopSlot(slot) }
+        guiPanel.onLauncher = { [weak self] action, slots in self?.sendLauncher(action: action, slots: slots) }
+        guiPanel.onArrange = { [weak self] slots in self?.sendArrange(slots: slots) }
     }
 
-    @objc private func selectSlot1() { connect(slot: 1) }
-    @objc private func selectSlot15() { connect(slot: 15) }
+    @objc private func previousSlotTapped() {
+        connect(slot: adjacentAvailableSlot(step: -1))
+    }
+
+    @objc private func nextSlotTapped() {
+        connect(slot: adjacentAvailableSlot(step: 1))
+    }
+
+    @objc private func showStreamSlotPicker() {
+        streamSlotPicker.apply(selectedSlot: selectedSlot, availableSlots: availableStreamSlots)
+        streamSlotPicker.isHidden = false
+        view.bringSubviewToFront(streamSlotPicker)
+    }
+
+    @objc private func showGUIPanel() {
+        guiPanel.isHidden = false
+        view.bringSubviewToFront(guiPanel)
+        refreshGUIBridgeState()
+    }
+
+    private func adjacentAvailableSlot(step: Int) -> Int {
+        for offset in 1...15 {
+            let zeroBased = (selectedSlot - 1 + step * offset + 150) % 15
+            let candidate = zeroBased + 1
+            if availableStreamSlots.contains(candidate) { return candidate }
+        }
+        return selectedSlot
+    }
 
     private func connect(slot: Int) {
+        guard (1...15).contains(slot) else { return }
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
@@ -235,11 +339,11 @@ final class StreamViewController: UIViewController {
         touchOverlay.isUserInteractionEnabled = false
         frameMonitor.reset()
         whepClient.stop()
-        refreshButtonState()
+        refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
 
-        api.fetchSources(baseURL: baseURL) { [weak self] result in
+        streamAPI.fetchSources(baseURL: baseURL) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self, sequence == self.connectionSequence else { return }
                 switch result {
@@ -247,6 +351,8 @@ final class StreamViewController: UIViewController {
                     self.setStatus(error.localizedDescription, good: false)
                 case .success(let response):
                     self.latestResponse = response
+                    self.availableStreamSlots = Set(response.sources.filter { $0.ok }.map(\.slot))
+                    self.refreshStreamControls()
                     guard let source = response.sources.first(where: { $0.slot == slot }), source.ok else {
                         let message = response.sources.first(where: { $0.slot == slot })?.error ?? "Slot \(slot) 不可用"
                         self.setStatus(message, good: false)
@@ -277,16 +383,9 @@ final class StreamViewController: UIViewController {
         sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(network.selectedAlias) m=\(network.selectedEffectiveMetric) | USB-WIN \(network.usbSharingCanWin ? "YES" : "NO") | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
     }
 
-    private func refreshButtonState() {
-        style(slot1Button, selected: selectedSlot == 1)
-        style(slot15Button, selected: selectedSlot == 15)
-    }
-
-    private func style(_ button: UIButton, selected: Bool) {
-        button.backgroundColor = selected
-            ? UIColor(red: 0.54, green: 0.9, blue: 0.4, alpha: 0.94)
-            : UIColor(white: 0.34, alpha: 0.75)
-        button.setTitleColor(selected ? UIColor(red: 0.04, green: 0.13, blue: 0.07, alpha: 1) : .white, for: .normal)
+    private func refreshStreamControls() {
+        currentSlotButton.setTitle(String(format: "GAME %02d", selectedSlot), for: .normal)
+        streamSlotPicker.apply(selectedSlot: selectedSlot, availableSlots: availableStreamSlots)
     }
 
     private func setStatus(_ text: String, good: Bool) {
@@ -311,8 +410,8 @@ final class StreamViewController: UIViewController {
         let inputRTT = lastInputRTTMilliseconds.map { "\($0)ms" } ?? "--"
         let hostToHID = lastHostToHIDMilliseconds.map { String(format: "%.1fms", $0) } ?? "--"
         metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nINPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
-        if let switchMs = lastSwitchMilliseconds, let inputMs = lastInputRTTMilliseconds {
-            targetLabel.textColor = switchMs <= 1000 && inputMs <= 300
+        if let switchMs = lastSwitchMilliseconds {
+            targetLabel.textColor = switchMs <= 1000
                 ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
                 : UIColor(red: 1, green: 0.35, blue: 0.26, alpha: 1)
         }
@@ -320,10 +419,10 @@ final class StreamViewController: UIViewController {
 
     private func enqueueInput(_ command: TouchOverlayView.Command) {
         guard configuredBaseURL() != nil, configuredInputToken() != nil else {
-            setStatus("尚未設定 pairing token", good: false)
+            setStatus("尚未設定可選的 input pairing token", good: false)
             return
         }
-        let item = QueuedInput(command: command, enqueuedAt: Date())
+        let item = QueuedInput(command: command)
         if command.action == "move", inputQueue.last?.command.action == "move" {
             inputQueue[inputQueue.count - 1] = item
         } else {
@@ -348,7 +447,7 @@ final class StreamViewController: UIViewController {
             clientSentAtMs: sentAt
         )
         let requestStartedAt = Date()
-        api.sendInput(baseURL: baseURL, token: token, input: request) { [weak self] result in
+        streamAPI.sendInput(baseURL: baseURL, token: token, input: request) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inputInFlight = false
@@ -363,6 +462,143 @@ final class StreamViewController: UIViewController {
                     self.setStatus(error.localizedDescription, good: false)
                 }
                 self.drainInputQueue()
+            }
+        }
+    }
+
+    @objc private func periodicBridgeRefresh() {
+        guard configuredBaseURL() != nil else { return }
+        refreshGUIBridgeState()
+    }
+
+    private func refreshGUIBridgeState() {
+        guard let baseURL = configuredBaseURL() else { return }
+
+        guiAPI.fetchTargets(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.bridgeTargetRunningSlots = Set(response.targetSlots.filter(\.running).map(\.slot))
+                    self.applyGUIBridgeState()
+                case .failure(let error):
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+
+        guiAPI.fetchModules(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.bridgeModules = response.modules
+                    self.applyGUIBridgeState()
+                case .failure(let error):
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+
+        guiAPI.fetchJobs(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    let heartbeat = response.gui
+                    self.bridgeHeartbeatFresh = heartbeat?.isFresh == true
+                    self.bridgeHeartbeatRunningSlots = Set(heartbeat?.runningSlots ?? [])
+                    self.bridgePlayingSlots = Set(heartbeat?.playingSlots ?? [])
+                    self.bridgeSlotPlaybackStatus = heartbeat?.slotPlaybackStatus ?? [:]
+                    self.applyGUIBridgeState()
+                    if response.executionOwner != "GUI_TEST_PC" || heartbeat?.executionOwner != "GUI_TEST_PC" {
+                        self.guiPanel.setStatus("拒絕：bridge execution owner 不是 GUI_TEST_PC。", good: false)
+                    } else if !self.guiPanel.isHidden {
+                        self.guiPanel.setStatus(
+                            self.bridgeHeartbeatFresh ? "GUI_TEST_PC 已連線，等待橋接命令。" : "GUI_TEST_PC heartbeat 已過期。",
+                            good: self.bridgeHeartbeatFresh
+                        )
+                    }
+                case .failure(let error):
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+    }
+
+    private func applyGUIBridgeState() {
+        let running = bridgeHeartbeatFresh ? bridgeHeartbeatRunningSlots : bridgeTargetRunningSlots
+        guiPanel.apply(
+            runningSlots: running,
+            playingSlots: bridgePlayingSlots,
+            slotPlaybackStatus: bridgeSlotPlaybackStatus,
+            modules: bridgeModules,
+            heartbeatFresh: bridgeHeartbeatFresh
+        )
+    }
+
+    private func sendModuleChain(slots: [Int], modules: [String]) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.playModuleChain(baseURL: baseURL, slots: slots, modules: modules) { [weak self] result in
+            self?.handleBridgeResult(result, success: "模組串列已交給 GUI_TEST_PC")
+        }
+    }
+
+    private func sendStopSlot(_ slot: Int) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.stopSlot(baseURL: baseURL, slot: slot) { [weak self] result in
+            self?.handleBridgeResult(result, success: "GAME \(slot) 單槽中止已交給 GUI_TEST_PC")
+        }
+    }
+
+    private func sendStopAll() {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.stopAll(baseURL: baseURL) { [weak self] result in
+            self?.handleBridgeResult(result, success: "全部中止已交給 GUI_TEST_PC")
+        }
+    }
+
+    private func sendLauncher(action: String, slots: [Int]) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.launcher(baseURL: baseURL, action: action, slots: slots) { [weak self] result in
+            self?.handleBridgeResult(result, success: "\(action) 已交給 GUI_TEST_PC", delayedRefresh: true)
+        }
+    }
+
+    private func sendArrange(slots: [Int]) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.ensureLayout(baseURL: baseURL, slots: slots) { [weak self] result in
+            self?.handleBridgeResult(result, success: "視窗排列已交給 GUI_TEST_PC", delayedRefresh: true)
+        }
+    }
+
+    private func handleBridgeResult(
+        _ result: Result<GUIBridgeResponse, Error>,
+        success: String,
+        delayedRefresh: Bool = false
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            switch result {
+            case .success(let response):
+                guard response.relayedTo == "GUI_TEST_PC" else {
+                    self.guiPanel.setStatus("拒絕：命令未 relay 到 GUI_TEST_PC。", good: false)
+                    return
+                }
+                self.guiPanel.setStatus("\(success)，job=\(response.job.id)", good: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.refreshGUIBridgeState()
+                }
+                if delayedRefresh {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                        self?.refreshGUIBridgeState()
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                        self?.refreshGUIBridgeState()
+                    }
+                }
+            case .failure(let error):
+                self.guiPanel.setStatus(error.localizedDescription, good: false)
             }
         }
     }
@@ -382,7 +618,7 @@ final class StreamViewController: UIViewController {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "Tailnet Windows 主機",
-            message: "輸入啟動器顯示的 HTTPS 主機及本機 pairing token。不要輸入 Tailscale auth key。",
+            message: "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 只供直接觸控，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -393,7 +629,7 @@ final class StreamViewController: UIViewController {
             field.autocorrectionType = .no
         }
         alert.addTextField { field in
-            field.placeholder = "本機 pairing token"
+            field.placeholder = "Input pairing token（可留空）"
             field.text = UserDefaults.standard.string(forKey: Defaults.inputToken)
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
@@ -401,14 +637,18 @@ final class StreamViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "儲存並連線", style: .default) { [weak self, weak alert] _ in
             guard let self,
-                  let value = alert?.textFields?.first?.text,
-                  let token = alert?.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !token.isEmpty else { return }
+                  let value = alert?.textFields?.first?.text else { return }
             do {
                 let base = try StreamEndpoint.normalizedHost(value)
+                let token = alert?.textFields?[1].text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 UserDefaults.standard.set(base.absoluteString, forKey: Defaults.host)
-                UserDefaults.standard.set(token, forKey: Defaults.inputToken)
+                if token.isEmpty {
+                    UserDefaults.standard.removeObject(forKey: Defaults.inputToken)
+                } else {
+                    UserDefaults.standard.set(token, forKey: Defaults.inputToken)
+                }
                 self.connect(slot: self.selectedSlot)
+                self.refreshGUIBridgeState()
             } catch {
                 self.setStatus(error.localizedDescription, good: false)
             }

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [int[]]$Slots = @(1, 15),
+    [int[]]$Slots = @(1..15),
     [ValidateSet("720p", "1080p")]
     [string]$Profile = "1080p",
     [ValidateRange(1, 60)]
@@ -139,9 +139,12 @@ function Get-PhysicalUnderlayGate {
     }
 }
 
-if (($Slots | Sort-Object -Unique) -join "," -ne "1,15") {
-    throw "This test has a fixed source set: -Slots 1,15"
+$expectedSlots = @(1..15)
+$normalizedSlots = @($Slots | Sort-Object -Unique)
+if (($normalizedSlots -join ",") -ne ($expectedSlots -join ",")) {
+    throw "This build requires the complete source set: -Slots 1,2,...,15"
 }
+$Slots = $normalizedSlots
 if (!(Test-Path -LiteralPath $TemplatePath)) { throw "Missing MediaMTX template: $TemplatePath" }
 if (!(Test-Path -LiteralPath $ServerScript)) { throw "Missing metadata server: $ServerScript" }
 if (!(Test-Path -LiteralPath $Tailscale)) { throw "Tailscale CLI was not found: $Tailscale" }
@@ -342,7 +345,7 @@ try {
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/health" -TimeoutSec 5
     if (!$health.all_sources_ready) { throw "The metadata service reports that a source is no longer ready." }
 
-    Write-Host "OPLINK_PC slot 1/15 no-ZEGO test is ready."
+    Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `
@@ -354,8 +357,7 @@ try {
     Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
     Write-Host "Pico input: $(if ($DisableInput) { 'disabled for stream-only test' } else { "$($picoHealth.report_mode) on $($picoHealth.port)" })"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
-    Write-Host "WHEP slot 1: https://$tailscaleDnsName/oplink-whep/slot01/whep"
-    Write-Host "WHEP slot 15: https://$tailscaleDnsName/oplink-whep/slot15/whep"
+    Write-Host "WHEP slots 1-15: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
 } catch {
     Stop-StartedProcesses
     if (Test-Path -LiteralPath $StatePath) { Remove-Item -LiteralPath $StatePath -Force }

@@ -1,53 +1,50 @@
-# OPLINK_PC No-ZEGO Slot 1/15 Test
+# OPLINK_PC No-ZEGO Slots 1-15 Test
 
-This isolated proof of concept compares native Windows game `.EXE` slots 1 and 15 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, or desktop screenshots. An authenticated Pico path measures network round-trip and host-to-HID acknowledgement time.
+This isolated native iOS proof of concept streams Windows game `.EXE` slots 1 through 15 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, CPU screenshots, or desktop-region capture.
+
+The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The phone only submits bridge commands. `GUI_TEST_PC` remains the sole owner of module execution, foreground-window scheduling, Pico HID output, cancellation, and launcher actions.
 
 ## Fixed test parameters
 
 | Item | Test rule |
 |---|---|
-| Sources | Slot 1 and slot 15 only |
-| Identity | GUI_TEST_PC launcher PID map, with `[01]`/`[15]` title fallback |
-| Capture | FFmpeg `gfxcapture` by exact verified game HWND |
-| Output | H.264, `1920x1080`, 30 fps, 6 Mbps |
+| Sources | Exact verified HWNDs for slots 1 through 15 |
+| Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[15]` title fallback |
+| Capture | FFmpeg `gfxcapture` Windows Graphics Capture by HWND; occluded windows remain observable |
+| Current game client | `1920x1080` for every slot, stacked at the same desktop position |
+| Output | H.264, `1920x1080`, 30 fps, 6 Mbps per publisher |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
-| Network | Tailscale Serve for WHEP signaling; media ICE advertises only the host Tailscale IPv4 |
+| Network | Tailscale Serve for HTTPS/WHEP; media ICE advertises only the host Tailscale IPv4 |
 | Switch target | First rendered frame within 1000 ms |
-| Playback target | Rendered 30 fps at 1080p |
-| Input target | iPhone-to-host round trip below 300 ms; host-to-Pico ACK reported separately |
-| Underlay gate | Both the best physical route and the overall default route must be wired Ethernet; USB sharing and VPN default routes are rejected |
+| Playback target | Stable rendered 30 fps at 1080p |
+| Input target | iPhone-to-host round trip below 300 ms when direct input is explicitly enabled |
+| Control owner | `GUI_TEST_PC`; iOS only calls `/gui-test-pc/api/...` bridge endpoints |
 
-Measured on 2026-07-17 at Windows display scale 150%:
+All 15 publishers run concurrently so the iPhone can keep observing a selected slot while `GUI_TEST_PC` changes the Windows foreground window for another slot. A desktop/front-window capture would follow the scheduler and is therefore not valid for this test. Host CPU/GPU load with all 15 publishers is an acceptance measurement, not an assumed result.
 
-| Slot | Logical game client | Expected WGC pixels | Aspect |
-|---|---:|---:|---:|
-| 1 | 512x288 | 768x432 | 16:9 |
-| 15 | 384x216 | 576x324 | 16:9 |
-
-The source sizes differ, but the aspect ratio does not. The host normalizes both streams to 1080p and publishes the original geometry as metadata. The iOS app never hard-codes either source size.
-
-The host reads `D:\15game\gui_test_pc_slot_pids.json` by default, verifies the mapped PID belongs to `StarCG.exe`, and reapplies `[01]` through `[15]` titles before capture. Pass `-SlotPidMapPath` if the launcher map moves. Window position is never used to guess slot identity.
+The host reads `D:\15game\gui_test_pc_slot_pids.json` by default, verifies each mapped PID belongs to `StarCG.exe`, and reapplies `[01]` through `[15]` titles before capture. Pass `-SlotPidMapPath` if the launcher map moves. Window position is never used to guess slot identity.
 
 ## Windows host
 
 Prerequisites:
 
-- Both `[01]` and `[15]` game windows are open and visible.
+- All 15 game windows are running and registered in the GUI_TEST_PC PID map.
+- Every game client is `1920x1080` and accepted by the active GUI_TEST_PC layout policy.
 - Tailscale is connected on Windows and iPhone.
 - FFmpeg includes the `gfxcapture` filter.
 - MediaMTX is available at `host/tools/mediamtx/mediamtx.exe`, or passed with `-MediaMTXPath`.
-- Pico is available on the COM port defined by the external GUI_TEST_PC `pico_touch.json`.
+- `GUI_TEST_PC` is running when the iOS bridge controls are used.
 
-Start the test from PowerShell:
+Start all 15 publishers from PowerShell:
 
 ```powershell
 cd host
-.\start_stream_test.ps1 -ConfigureTailscaleServe
+.\start_stream_test.ps1 -ConfigureTailscaleServe -DisableInput
 ```
 
-Acceptance mode is strict. If Surfshark or another VPN owns the overall default route, startup stops before capture begins. `-AllowVpnDefaultRoute` exists only for development and must not be used for the Ethernet acceptance test.
+`-DisableInput` is the required mode while `GUI_TEST_PC` owns Pico `COM5` for module playback. It prevents the streaming host from opening Pico and leaves direct iOS touch disabled. The module/launcher controls still work because they submit bridge commands to `GUI_TEST_PC` rather than writing HID reports themselves.
 
-For a stream-only test while GUI_TEST_PC owns Pico `COM5`, use `-DisableInput`. This prevents the streaming host from opening Pico and the iOS app keeps its touch overlay disabled. Release `COM5` and restart without `-DisableInput` before measuring input latency.
+Acceptance mode is strict. If Surfshark or another VPN owns the overall default route, startup stops before capture begins. `-AllowVpnDefaultRoute` exists only for development and must not be treated as Ethernet acceptance.
 
 If MediaMTX is not installed in the ignored tools directory:
 
@@ -61,22 +58,42 @@ Stop only the processes recorded by this project:
 .\stop_stream_test.ps1
 ```
 
-The start command prints the Tailnet HTTPS host and a random runtime pairing token to enter in the iOS app. It also writes runtime diagnostics to the ignored `host/runtime/state.json`. The token is never committed.
+The start command prints the Tailnet HTTPS host. A random local pairing token is printed only when direct iOS input is enabled. Runtime diagnostics and the token stay under ignored `host/runtime/` files.
 
-The current local Pico config reports `absolute_mouse`. The app displays that exact backend name; it does not label it as touchscreen. Input measurements are command round-trip and Pico ACK measurements, not an automatic measurement of the game's visual touch-to-photon response.
+## GUI_TEST_PC bridge contract
+
+The native app reads:
+
+- `GET /gui-test-pc/api/targets`
+- `GET /gui-test-pc/api/modules`
+- `GET /gui-test-pc/api/play/jobs`
+
+The native app can enqueue:
+
+- `play_module_chain`
+- `stop_slot_playback`
+- `stop_all_playback`
+- `launcher_action`
+- `window_layout`
+
+Every successful command response must report `relayed_to: GUI_TEST_PC`, and the jobs endpoint must report `execution_owner: GUI_TEST_PC`. The app has no script player, Pico scheduler, process launcher, or shell execution path.
 
 ## iOS app and unsigned IPA
 
-The iOS project is generated by XcodeGen and uses the community `stasel/WebRTC` XCFramework package. The app stores the Tailnet HTTPS host and local runtime pairing token entered by the user.
+The app provides:
 
-GitHub Actions runs the public-repository audit, generates the Xcode project, resolves Swift packages, builds without code signing, and uploads `OPLINKStreamTest-unsigned.ipa` as an artifact. The IPA still needs normal Windows-side signing before installation.
+- previous/next switching across available slots 1 through 15;
+- a 15-slot stream-selection grid;
+- a GUI_TEST_PC slot grid using gray/green/red states for unselected/selected/playing;
+- a 10-step module chain showing module names only;
+- single-slot cancel without stopping other slots;
+- start, stop, restart, and window-arrange bridge controls;
+- live 1080p/FPS/switch-time metrics.
 
-The first cloud build passed on 2026-07-17. The downloaded IPA and its verification details are recorded in [docs/BUILD_RECEIPT_20260717.md](docs/BUILD_RECEIPT_20260717.md). Follow [docs/WINDOWS_SIGN_AND_INSTALL.md](docs/WINDOWS_SIGN_AND_INSTALL.md) to install it without changing the native WebRTC implementation.
+The Tailnet HTTPS host is required. The input pairing token is optional and can remain blank for stream observation plus GUI bridge control.
 
-No GitHub Actions secret is needed. Do not add a Tailscale auth key, Apple signing certificate, provisioning profile, ZEGO credential, private key, or local runtime file to the repository.
+The iOS project is generated by XcodeGen and uses the community `stasel/WebRTC` XCFramework package. GitHub Actions audits the public repository, generates the Xcode project, resolves Swift packages, builds without code signing, and uploads `OPLINKStreamTest-unsigned.ipa`. The IPA still needs normal Windows-side signing before installation.
 
-## Scope boundary
+No GitHub Actions secret is needed. Do not add a Tailscale auth key, Apple signing certificate, provisioning profile, ZEGO credential, private key, host URL, pairing token, or local runtime file to the repository.
 
-Running two publishers is intentional for this slot 1/15 A/B test, because it allows immediate switching without restarting capture. This is not the final 15-window architecture. After the 720p30 and switch gates pass on the iPhone, production work should use one viewed source, one encoder, and source hot-switching without renegotiation.
-
-See [docs/REAL_DEVICE_TEST.md](docs/REAL_DEVICE_TEST.md) for the acceptance procedure and [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md) before making the repository public.
+See [docs/REAL_DEVICE_TEST.md](docs/REAL_DEVICE_TEST.md) for the device-test procedure and [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md) before publishing a release artifact.

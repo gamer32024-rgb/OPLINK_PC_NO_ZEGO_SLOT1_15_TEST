@@ -227,7 +227,7 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    slots = [1, 15]
+    slots = list(range(1, 16))
     input_token = ""
     input_controller: PicoStreamInputController | None = None
 
@@ -252,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/api/v1/health"):
             payload = sources_payload(self.slots)
-            payload["service"] = "oplink-pc-no-zego-slot-1-15-test"
+            payload["service"] = "oplink-pc-no-zego-slots-1-15"
             payload["all_sources_ready"] = all(item["ok"] for item in payload["sources"])
             self._json(payload)
             return
@@ -290,10 +290,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OPLINK_PC slot 1/15 stream metadata service")
+    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 stream metadata service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5110)
-    parser.add_argument("--slots", default="1,15")
+    parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
     parser.add_argument("--probe", type=int)
     parser.add_argument("--pico-config")
     parser.add_argument("--input-token-file")
