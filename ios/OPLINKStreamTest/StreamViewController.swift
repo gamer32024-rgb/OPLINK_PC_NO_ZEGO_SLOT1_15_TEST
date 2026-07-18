@@ -8,6 +8,7 @@ final class StreamViewController: UIViewController {
     }
 
     private struct QueuedInput {
+        let slot: Int
         let command: TouchOverlayView.Command
     }
 
@@ -23,8 +24,11 @@ final class StreamViewController: UIViewController {
     private let sourceLabel = UILabel()
     private let metricsLabel = UILabel()
     private let targetLabel = UILabel()
-    private let streamSlotPicker = StreamSlotPickerView(frame: .zero)
+    private let streamSlotPicker = StreamSlotPickerView(effect: nil)
     private let guiPanel = GUIControlPanelView(frame: .zero)
+    private let legacyControls = LegacyStreamControlsView()
+    private let fixedRightRail = FixedRightRailView()
+    private let inputToast = UILabel()
     private let streamAPI = StreamAPI()
     private let guiAPI = GUIBridgeAPI()
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
@@ -53,6 +57,12 @@ final class StreamViewController: UIViewController {
     private var bridgeSlotPlaybackStatus: [String: String] = [:]
     private var bridgeModules: [String: [String]] = [:]
     private var bridgeHeartbeatFresh = false
+    private var suppressTouchSequenceForControlCollapse = false
+    private var controlCenterXConstraint: NSLayoutConstraint?
+    private var controlCenterYConstraint: NSLayoutConstraint?
+    private var controlDragStart = CGPoint.zero
+    private var controlPositionReady = false
+    private var inputToastTask: DispatchWorkItem?
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
@@ -93,6 +103,12 @@ final class StreamViewController: UIViewController {
         }
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        positionLegacyControlsIfNeeded()
+        clampLegacyControls(save: false)
+    }
+
     deinit {
         metricsTimer?.invalidate()
         bridgeTimer?.invalidate()
@@ -119,25 +135,145 @@ final class StreamViewController: UIViewController {
             touchOverlay.bottomAnchor.constraint(equalTo: videoView.bottomAnchor)
         ])
 
-        buildTopChrome()
-        buildMetricsPanel()
-
         streamSlotPicker.translatesAutoresizingMaskIntoConstraints = false
         streamSlotPicker.isHidden = true
         view.addSubview(streamSlotPicker)
         guiPanel.translatesAutoresizingMaskIntoConstraints = false
         guiPanel.isHidden = true
         view.addSubview(guiPanel)
+        buildLegacyControls()
+        buildInputToast()
         NSLayoutConstraint.activate([
-            streamSlotPicker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            streamSlotPicker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            streamSlotPicker.topAnchor.constraint(equalTo: view.topAnchor),
-            streamSlotPicker.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            streamSlotPicker.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 4),
+            streamSlotPicker.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            streamSlotPicker.widthAnchor.constraint(equalToConstant: 82),
+            streamSlotPicker.heightAnchor.constraint(equalToConstant: 300),
             guiPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             guiPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             guiPanel.topAnchor.constraint(equalTo: view.topAnchor),
             guiPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    private func buildLegacyControls() {
+        view.addSubview(legacyControls)
+        view.addSubview(fixedRightRail)
+
+        let centerX = legacyControls.centerXAnchor.constraint(equalTo: view.leadingAnchor)
+        let centerY = legacyControls.centerYAnchor.constraint(equalTo: view.topAnchor)
+        controlCenterXConstraint = centerX
+        controlCenterYConstraint = centerY
+
+        NSLayoutConstraint.activate([
+            centerX,
+            centerY,
+            fixedRightRail.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            fixedRightRail.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: 78)
+        ])
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleLegacyControlPan(_:)))
+        pan.cancelsTouchesInView = false
+        legacyControls.addGestureRecognizer(pan)
+    }
+
+    private func buildInputToast() {
+        inputToast.translatesAutoresizingMaskIntoConstraints = false
+        inputToast.font = .monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+        inputToast.textColor = .white
+        inputToast.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        inputToast.textAlignment = .center
+        inputToast.layer.cornerRadius = 11
+        inputToast.layer.masksToBounds = true
+        inputToast.alpha = 0
+        view.addSubview(inputToast)
+        NSLayoutConstraint.activate([
+            inputToast.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            inputToast.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            inputToast.heightAnchor.constraint(equalToConstant: 24),
+            inputToast.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
+        ])
+    }
+
+    private func positionLegacyControlsIfNeeded() {
+        guard !controlPositionReady,
+              view.bounds.width > 0,
+              view.bounds.height > 0,
+              let centerX = controlCenterXConstraint,
+              let centerY = controlCenterYConstraint else { return }
+        let savedX = UserDefaults.standard.object(forKey: "oplink.pc.control.xRatio") as? Double
+        let savedY = UserDefaults.standard.object(forKey: "oplink.pc.control.yRatio") as? Double
+        if let savedX, let savedY {
+            centerX.constant = CGFloat(savedX) * view.bounds.width
+            centerY.constant = CGFloat(savedY) * view.bounds.height
+        } else {
+            let safe = view.safeAreaLayoutGuide.layoutFrame
+            centerX.constant = safe.maxX - 86
+            centerY.constant = safe.minY + safe.height * 0.66
+        }
+        controlPositionReady = true
+    }
+
+    @objc private func handleLegacyControlPan(_ gesture: UIPanGestureRecognizer) {
+        guard let centerX = controlCenterXConstraint,
+              let centerY = controlCenterYConstraint else { return }
+        switch gesture.state {
+        case .began:
+            controlDragStart = CGPoint(x: centerX.constant, y: centerY.constant)
+            legacyControls.layer.borderWidth = 1
+            legacyControls.layer.borderColor = UIColor.systemGreen.withAlphaComponent(0.55).cgColor
+        case .changed:
+            let translation = gesture.translation(in: view)
+            centerX.constant = controlDragStart.x + translation.x
+            centerY.constant = controlDragStart.y + translation.y
+            clampLegacyControls(save: false)
+        case .ended, .cancelled, .failed:
+            clampLegacyControls(save: true)
+            legacyControls.layer.borderWidth = 0
+            legacyControls.layer.borderColor = nil
+        default:
+            break
+        }
+    }
+
+    private func clampLegacyControls(save: Bool) {
+        guard controlPositionReady,
+              let centerX = controlCenterXConstraint,
+              let centerY = controlCenterYConstraint,
+              view.bounds.width > 0,
+              view.bounds.height > 0 else { return }
+        let safe = view.safeAreaLayoutGuide.layoutFrame
+        let halfWidth = max(19, legacyControls.bounds.width / 2)
+        let halfHeight = max(19, legacyControls.bounds.height / 2)
+        centerX.constant = min(
+            max(centerX.constant, safe.minX + halfWidth),
+            safe.maxX - 54 - halfWidth
+        )
+        centerY.constant = min(
+            max(centerY.constant, safe.minY + halfHeight),
+            safe.maxY - halfHeight
+        )
+        if save {
+            UserDefaults.standard.set(centerX.constant / view.bounds.width, forKey: "oplink.pc.control.xRatio")
+            UserDefaults.standard.set(centerY.constant / view.bounds.height, forKey: "oplink.pc.control.yRatio")
+        }
+    }
+
+    private func collapseLegacyControls() {
+        legacyControls.setExpanded(false, animated: true)
+        streamSlotPicker.isHidden = true
+    }
+
+    private func showInputToast(_ text: String, good: Bool = true) {
+        inputToastTask?.cancel()
+        inputToast.text = "  \(text)  "
+        inputToast.textColor = good ? .white : UIColor.systemRed
+        view.bringSubviewToFront(inputToast)
+        UIView.animate(withDuration: 0.12) { self.inputToast.alpha = 1 }
+        let task = DispatchWorkItem { [weak self] in
+            UIView.animate(withDuration: 0.2) { self?.inputToast.alpha = 0 }
+        }
+        inputToastTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: task)
     }
 
     private func buildTopChrome() {
@@ -259,6 +395,7 @@ final class StreamViewController: UIViewController {
             self.switchStartedAt = nil
             self.touchOverlay.isUserInteractionEnabled = self.configuredInputToken() != nil
                 && self.latestResponse?.input.enabled == true
+                && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
         }
@@ -273,14 +410,42 @@ final class StreamViewController: UIViewController {
             self?.setStatus(error.localizedDescription, good: false)
         }
         touchOverlay.onCommand = { [weak self] command in
-            self?.enqueueInput(command)
+            guard let self else { return }
+            if command.action == "down",
+               self.legacyControls.isExpanded || !self.streamSlotPicker.isHidden {
+                self.collapseLegacyControls()
+                self.suppressTouchSequenceForControlCollapse = true
+                return
+            }
+            if self.suppressTouchSequenceForControlCollapse {
+                if command.action == "up" || command.action == "cancel" {
+                    self.suppressTouchSequenceForControlCollapse = false
+                }
+                return
+            }
+            self.enqueueInput(command)
+        }
+        touchOverlay.onTouchOutsideVideo = { [weak self] in
+            guard let self,
+                  self.legacyControls.isExpanded || !self.streamSlotPicker.isHidden else { return }
+            self.collapseLegacyControls()
+            self.suppressTouchSequenceForControlCollapse = false
         }
 
-        streamSlotPicker.onClose = { [weak self] in self?.streamSlotPicker.isHidden = true }
         streamSlotPicker.onSelectSlot = { [weak self] slot in
-            self?.streamSlotPicker.isHidden = true
             self?.connect(slot: slot)
         }
+
+        legacyControls.onPrevious = { [weak self] in self?.previousSlotTapped() }
+        legacyControls.onList = { [weak self] in self?.showStreamSlotPicker() }
+        legacyControls.onNext = { [weak self] in self?.nextSlotTapped() }
+        legacyControls.onSettings = { [weak self] in self?.presentHostSettings() }
+        legacyControls.onExpandedChanged = { [weak self] _ in
+            self?.view.layoutIfNeeded()
+            self?.clampLegacyControls(save: false)
+        }
+        fixedRightRail.onControlPanel = { [weak self] in self?.showGUIPanel() }
+        fixedRightRail.onKeyboard = { [weak self] in self?.showKeyboardStatus() }
 
         guiPanel.onClose = { [weak self] in self?.guiPanel.isHidden = true }
         guiPanel.onRefresh = { [weak self] in self?.refreshGUIBridgeState() }
@@ -300,15 +465,29 @@ final class StreamViewController: UIViewController {
     }
 
     @objc private func showStreamSlotPicker() {
+        legacyControls.setExpanded(false, animated: true)
         streamSlotPicker.apply(selectedSlot: selectedSlot, availableSlots: availableStreamSlots)
-        streamSlotPicker.isHidden = false
+        streamSlotPicker.isHidden.toggle()
+        guard !streamSlotPicker.isHidden else { return }
         view.bringSubviewToFront(streamSlotPicker)
+        view.bringSubviewToFront(legacyControls)
     }
 
     @objc private func showGUIPanel() {
+        collapseLegacyControls()
         guiPanel.isHidden = false
         view.bringSubviewToFront(guiPanel)
         refreshGUIBridgeState()
+    }
+
+    private func showKeyboardStatus() {
+        let alert = UIAlertController(
+            title: "Keyboard",
+            message: "The keyboard control is in the accepted position. This touch build does not substitute Windows virtual keyboard input for Pico HID.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     private func adjacentAvailableSlot(step: Int) -> Int {
@@ -476,7 +655,7 @@ final class StreamViewController: UIViewController {
             setStatus("尚未設定可選的 input pairing token", good: false)
             return
         }
-        let item = QueuedInput(command: command)
+        let item = QueuedInput(slot: selectedSlot, command: command)
         if command.action == "move", inputQueue.last?.command.action == "move" {
             inputQueue[inputQueue.count - 1] = item
         } else {
@@ -493,7 +672,7 @@ final class StreamViewController: UIViewController {
         let queued = inputQueue.removeFirst()
         let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
         let request = StreamInputRequest(
-            slot: selectedSlot,
+            slot: queued.slot,
             action: queued.command.action,
             x: queued.command.x,
             y: queued.command.y,
@@ -507,13 +686,23 @@ final class StreamViewController: UIViewController {
                 self.inputInFlight = false
                 switch result {
                 case .success(let response):
+                    guard response.executionOwner == "GUI_TEST_PC",
+                          response.relayedTo == "GUI_TEST_PC" else {
+                        self.inputQueue.removeAll()
+                        self.setStatus("Rejected input response outside GUI_TEST_PC", good: false)
+                        self.showInputToast("INPUT OWNER REJECTED", good: false)
+                        return
+                    }
                     self.lastInputRTTMilliseconds = Int(Date().timeIntervalSince(requestStartedAt) * 1000)
                     self.lastHostToHIDMilliseconds = response.hostToHIDAckMs
                     self.lastInputBackend = response.backend
                     self.updateMetrics()
+                    let rtt = self.lastInputRTTMilliseconds ?? 0
+                    self.showInputToast("\(response.action.uppercased())  RTT \(rtt)ms  HID \(String(format: "%.1f", response.hostToHIDAckMs))ms")
                 case .failure(let error):
                     self.inputQueue.removeAll()
                     self.setStatus(error.localizedDescription, good: false)
+                    self.showInputToast(error.localizedDescription, good: false)
                 }
                 self.drainInputQueue()
             }
@@ -672,7 +861,7 @@ final class StreamViewController: UIViewController {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "Tailnet Windows 主機",
-            message: "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 只供直接觸控，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
+            message: "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 只供即時觸控，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
             preferredStyle: .alert
         )
         alert.addTextField { field in

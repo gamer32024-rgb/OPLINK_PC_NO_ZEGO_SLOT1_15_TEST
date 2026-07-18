@@ -38,6 +38,13 @@ final class GUIControlPanelView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        if !card.frame.contains(touch.location(in: self)) {
+            onClose?()
+        }
+    }
+
     func apply(
         runningSlots: Set<Int>,
         playingSlots: Set<Int>,
@@ -67,10 +74,10 @@ final class GUIControlPanelView: UIView {
     }
 
     private func buildLayout() {
-        backgroundColor = UIColor.black.withAlphaComponent(0.64)
+        backgroundColor = .clear
 
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor(red: 0.035, green: 0.065, blue: 0.075, alpha: 0.985)
+        card.backgroundColor = UIColor.black.withAlphaComponent(0.50)
         card.layer.cornerRadius = 18
         card.layer.borderWidth = 1
         card.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
@@ -112,11 +119,14 @@ final class GUIControlPanelView: UIView {
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mainStack)
 
+        let preferredWidth = card.widthAnchor.constraint(equalToConstant: 690)
+        preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            card.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            card.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 12),
-            card.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            card.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: safeAreaLayoutGuide.centerYAnchor),
+            preferredWidth,
+            card.widthAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.widthAnchor, multiplier: 0.92),
+            card.heightAnchor.constraint(equalToConstant: 300),
             mainStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             mainStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
             mainStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
@@ -250,7 +260,7 @@ final class GUIControlPanelView: UIView {
 
     private func buildModuleChooser() {
         moduleChooser.translatesAutoresizingMaskIntoConstraints = false
-        moduleChooser.backgroundColor = UIColor(red: 0.025, green: 0.055, blue: 0.065, alpha: 0.995)
+        moduleChooser.backgroundColor = UIColor.black.withAlphaComponent(0.68)
         moduleChooser.layer.cornerRadius = 15
         moduleChooser.layer.borderWidth = 1
         moduleChooser.layer.borderColor = UIColor(red: 0.47, green: 0.86, blue: 0.94, alpha: 0.65).cgColor

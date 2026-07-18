@@ -1,16 +1,16 @@
 import UIKit
 
-final class StreamSlotPickerView: UIView {
+final class StreamSlotPickerView: UIVisualEffectView {
     var onSelectSlot: ((Int) -> Void)?
-    var onClose: (() -> Void)?
 
-    private let card = UIView()
+    private let scrollView = UIScrollView()
+    private let stack = UIStackView()
     private var buttons: [UIButton] = []
     private var selectedSlot = 1
     private var availableSlots = Set(1...15)
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    override init(effect: UIVisualEffect?) {
+        super.init(effect: effect ?? UIBlurEffect(style: .systemThinMaterialDark))
         buildLayout()
     }
 
@@ -25,72 +25,46 @@ final class StreamSlotPickerView: UIView {
     }
 
     private func buildLayout() {
-        backgroundColor = UIColor.black.withAlphaComponent(0.62)
+        alpha = 0.82
+        layer.cornerRadius = 14
+        layer.masksToBounds = true
 
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor(red: 0.045, green: 0.075, blue: 0.085, alpha: 0.98)
-        card.layer.cornerRadius = 20
-        card.layer.borderWidth = 1
-        card.layer.borderColor = UIColor.white.withAlphaComponent(0.15).cgColor
-        addSubview(card)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.alwaysBounceVertical = true
+        contentView.addSubview(scrollView)
 
-        let title = UILabel()
-        title.text = "選擇遊戲串流"
-        title.textColor = .white
-        title.font = .systemFont(ofSize: 17, weight: .bold)
-
-        let close = UIButton(type: .system)
-        close.setImage(UIImage(systemName: "xmark"), for: .normal)
-        close.tintColor = .white
-        close.backgroundColor = UIColor.white.withAlphaComponent(0.1)
-        close.layer.cornerRadius = 15
-        close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        close.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        close.heightAnchor.constraint(equalToConstant: 30).isActive = true
-
-        let header = UIStackView(arrangedSubviews: [title, UIView(), close])
-        header.axis = .horizontal
-        header.alignment = .center
-
-        let grid = UIStackView()
-        grid.axis = .vertical
-        grid.spacing = 8
-        grid.distribution = .fillEqually
-        for rowIndex in 0..<3 {
-            let row = UIStackView()
-            row.axis = .horizontal
-            row.spacing = 8
-            row.distribution = .fillEqually
-            for columnIndex in 0..<5 {
-                let slot = rowIndex * 5 + columnIndex + 1
-                let button = UIButton(type: .system)
-                button.tag = slot
-                button.setTitle(String(format: "%02d", slot), for: .normal)
-                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 17, weight: .bold)
-                button.layer.cornerRadius = 10
-                button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
-                buttons.append(button)
-                row.addArrangedSubview(button)
-            }
-            grid.addArrangedSubview(row)
-        }
-
-        let stack = UIStackView(arrangedSubviews: [header, grid])
         stack.axis = .vertical
-        stack.spacing = 12
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
+        scrollView.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            card.centerXAnchor.constraint(equalTo: centerXAnchor),
-            card.centerYAnchor.constraint(equalTo: centerYAnchor),
-            card.widthAnchor.constraint(equalToConstant: 410),
-            card.heightAnchor.constraint(equalToConstant: 235),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -10),
+            stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -20)
         ])
+
+        for slot in 1...15 {
+            let button = UIButton(type: .system)
+            button.tag = slot
+            button.setTitle(String(format: "%02d", slot), for: .normal)
+            button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
+            button.tintColor = .white
+            button.layer.cornerRadius = 6
+            button.layer.masksToBounds = true
+            button.accessibilityLabel = "Game slot \(slot)"
+            button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
+            button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            buttons.append(button)
+            stack.addArrangedSubview(button)
+        }
         refreshButtons()
     }
 
@@ -98,22 +72,21 @@ final class StreamSlotPickerView: UIView {
         for button in buttons {
             let slot = button.tag
             let available = availableSlots.contains(slot)
-            let selected = selectedSlot == slot
             button.isEnabled = available
-            button.backgroundColor = selected
-                ? UIColor(red: 0.43, green: 0.88, blue: 0.5, alpha: 1)
-                : UIColor(white: available ? 0.28 : 0.13, alpha: 0.95)
-            button.setTitleColor(selected ? UIColor(red: 0.02, green: 0.13, blue: 0.06, alpha: 1) : .white, for: .normal)
-            button.alpha = available ? 1 : 0.42
+            button.backgroundColor = selectedSlot == slot
+                ? UIColor.systemGreen.withAlphaComponent(0.45)
+                : UIColor.white.withAlphaComponent(available ? 0.12 : 0.05)
+            button.setTitleColor(
+                available ? .white : UIColor.white.withAlphaComponent(0.35),
+                for: .normal
+            )
         }
     }
 
     @objc private func slotTapped(_ sender: UIButton) {
         guard availableSlots.contains(sender.tag) else { return }
+        selectedSlot = sender.tag
+        refreshButtons()
         onSelectSlot?(sender.tag)
-    }
-
-    @objc private func closeTapped() {
-        onClose?()
     }
 }

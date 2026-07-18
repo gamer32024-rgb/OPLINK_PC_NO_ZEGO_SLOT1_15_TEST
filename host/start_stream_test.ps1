@@ -20,6 +20,9 @@ param(
     [switch]$AllowNonEthernetUnderlay,
     [switch]$AllowVpnDefaultRoute,
     [switch]$DisableInput,
+    [switch]$DirectPicoInput,
+    [ValidateRange(1024, 65535)]
+    [int]$GuiTestPcLiveInputPort = 5111,
     [switch]$Restart
 )
 
@@ -188,6 +191,21 @@ if (!$MediaMTX) { throw "MediaMTX was not found. Run .\install_mediamtx.ps1 or p
 if (!$Python) { throw "Python 3 was not found. Pass -PythonPath." }
 if (!(Test-Path -LiteralPath $PicoConfig -PathType Leaf)) { throw "Pico config was not found: $PicoConfig" }
 $PicoConfig = (Resolve-Path -LiteralPath $PicoConfig).Path
+if ($DisableInput -and $DirectPicoInput) {
+    throw "-DisableInput and -DirectPicoInput cannot be used together."
+}
+$inputMode = if ($DisableInput) { "disabled" } elseif ($DirectPicoInput) { "direct" } else { "gui_test_pc" }
+$guiInputBase = "http://127.0.0.1:$GuiTestPcLiveInputPort"
+if ($inputMode -eq "gui_test_pc") {
+    try {
+        $guiInputHealth = Invoke-RestMethod -Uri "$guiInputBase/health" -TimeoutSec 3
+    } catch {
+        throw "GUI_TEST_PC live touch bridge is not ready on $guiInputBase. Restart GUI_TEST_PC first. $($_.Exception.Message)"
+    }
+    if (!$guiInputHealth.enabled -or $guiInputHealth.execution_owner -ne "GUI_TEST_PC") {
+        throw "GUI_TEST_PC live touch bridge did not report the required execution owner."
+    }
+}
 
 $filterInfo = & $FFmpeg -hide_banner -filters 2>&1 | Out-String
 if ($filterInfo -notmatch "\bgfxcapture\b") {
@@ -224,7 +242,7 @@ $configText = (Get-Content -LiteralPath $TemplatePath -Raw).Replace("__TAILSCALE
 $inputToken = ""
 $inputTokenPath = Join-Path $Runtime "input_token.txt"
 $picoHealth = $null
-if ($DisableInput) {
+if ($inputMode -eq "disabled") {
     if (Test-Path -LiteralPath $inputTokenPath) { Remove-Item -LiteralPath $inputTokenPath -Force }
 } else {
     $tokenBytes = New-Object byte[] 24
@@ -233,9 +251,11 @@ if ($DisableInput) {
     $random.Dispose()
     $inputToken = [Convert]::ToBase64String($tokenBytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
     [System.IO.File]::WriteAllText($inputTokenPath, $inputToken, [System.Text.UTF8Encoding]::new($false))
-    $picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
-    if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }
-    $picoHealth = $picoHealthText | ConvertFrom-Json
+    if ($inputMode -eq "direct") {
+        $picoHealthText = & $Python $ServerScript --pico-config $PicoConfig --pico-health
+        if ($LASTEXITCODE -ne 0) { throw "Pico health check failed before streaming startup." }
+        $picoHealth = $picoHealthText | ConvertFrom-Json
+    }
 }
 
 $selectedEncoder = $Encoder
@@ -289,8 +309,10 @@ try {
         "--width", "$profileWidth", "--height", "$profileHeight",
         "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps"
     )
-    if (!$DisableInput) {
+    if ($inputMode -eq "direct") {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
+    } elseif ($inputMode -eq "gui_test_pc") {
+        $apiArguments += @("--gui-input-url", $guiInputBase, "--input-token-file", $inputTokenPath)
     }
     $api = Start-HiddenProcess -FilePath $Python -Arguments $apiArguments `
         -StdoutPath (Join-Path $Runtime "api.out.log") -StderrPath (Join-Path $Runtime "api.err.log")
@@ -305,14 +327,14 @@ try {
         }
         encoder = $selectedEncoder
         network_underlay = $networkUnderlay
-        input = if ($DisableInput) {
+        input = if ($inputMode -eq "disabled") {
             [ordered]@{
                 enabled = $false
                 token_required = $false
                 report_mode = "disabled_for_stream_test"
                 measurement = "disabled"
             }
-        } else {
+        } elseif ($inputMode -eq "direct") {
             [ordered]@{
                 enabled = $true
                 token_required = $true
@@ -320,6 +342,17 @@ try {
                 port = [string]$picoHealth.port
                 min_slot_interval_ms = [int]$picoHealth.min_slot_interval_ms
                 measurement = "network_rtt_and_host_to_hid_ack"
+            }
+        } else {
+            [ordered]@{
+                enabled = $true
+                token_required = $true
+                report_mode = [string]$guiInputHealth.report_mode
+                port = [string]$guiInputHealth.port
+                min_slot_interval_ms = 0
+                measurement = "network_rtt_and_host_to_hid_ack"
+                execution_owner = "GUI_TEST_PC"
+                relayed_to = "GUI_TEST_PC"
             }
         }
         source_identities = $identities
@@ -366,9 +399,9 @@ try {
             $identity.capture_physical_expected.w, $identity.capture_physical_expected.h, $identity.aspect)
     }
     Write-Host "iOS app host: https://$tailscaleDnsName"
-    Write-Host "iOS pairing token: $(if ($DisableInput) { '<disabled>' } else { $inputToken })"
+    Write-Host "iOS pairing token: $(if ($inputMode -eq 'disabled') { '<disabled>' } else { $inputToken })"
     Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
-    Write-Host "Pico input: $(if ($DisableInput) { 'disabled for stream-only test' } else { "$($picoHealth.report_mode) on $($picoHealth.port)" })"
+    Write-Host "Pico input: $(if ($inputMode -eq 'disabled') { 'disabled' } elseif ($inputMode -eq 'direct') { "$($picoHealth.report_mode) direct on $($picoHealth.port)" } else { "$($guiInputHealth.report_mode) via GUI_TEST_PC on $($guiInputHealth.port)" })"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
     Write-Host "WHEP slots 1-15: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
 } catch {

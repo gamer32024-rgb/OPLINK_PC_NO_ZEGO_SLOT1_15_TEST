@@ -40,12 +40,16 @@ struct StreamInputInfo: Decodable {
     let reportMode: String?
     let port: String?
     let minSlotIntervalMs: Int?
+    let executionOwner: String?
+    let relayedTo: String?
 
     enum CodingKeys: String, CodingKey {
         case enabled, port
         case tokenRequired = "token_required"
         case reportMode = "report_mode"
         case minSlotIntervalMs = "min_slot_interval_ms"
+        case executionOwner = "execution_owner"
+        case relayedTo = "relayed_to"
     }
 }
 
@@ -96,6 +100,8 @@ struct StreamInputResponse: Decodable {
     let hostToHIDAckMs: Double
     let slotCooldownWaitMs: Int
     let backend: String
+    let executionOwner: String?
+    let relayedTo: String?
 
     enum CodingKeys: String, CodingKey {
         case ok, slot, action, backend
@@ -103,6 +109,8 @@ struct StreamInputResponse: Decodable {
         case hidAckAtMs = "hid_ack_at_ms"
         case hostToHIDAckMs = "host_to_hid_ack_ms"
         case slotCooldownWaitMs = "slot_cooldown_wait_ms"
+        case executionOwner = "execution_owner"
+        case relayedTo = "relayed_to"
     }
 }
 

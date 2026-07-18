@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 
@@ -233,6 +233,88 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
 
 class StreamPublisherError(RuntimeError):
     pass
+
+
+class GuiTestPcInputError(RuntimeError):
+    def __init__(self, message: str, status: int = HTTPStatus.BAD_GATEWAY) -> None:
+        super().__init__(message)
+        self.status = int(status)
+
+
+class GuiTestPcInputRelay:
+    """Relays authenticated stream input to GUI_TEST_PC over loopback only."""
+
+    def __init__(self, base_url: str) -> None:
+        parsed = urlparse(str(base_url).rstrip("/"))
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("GUI_TEST_PC live input URL must be a loopback HTTP URL")
+        if not parsed.port:
+            raise ValueError("GUI_TEST_PC live input URL must include a port")
+        self.base_url = str(base_url).rstrip("/")
+
+    def health(self) -> dict[str, object]:
+        payload = self._request("/health", method="GET", timeout=1.0)
+        if (
+            payload.get("enabled") is not True
+            or payload.get("execution_owner") != "GUI_TEST_PC"
+            or payload.get("relayed_to") != "GUI_TEST_PC"
+        ):
+            raise GuiTestPcInputError("GUI_TEST_PC live input health identity is invalid")
+        result = dict(payload)
+        result["token_required"] = True
+        return result
+
+    def handle(self, payload: dict[str, object]) -> dict[str, object]:
+        forwarded = dict(payload)
+        forwarded["host_received_at_ms"] = int(time.time() * 1000)
+        result = self._request("/input", method="POST", payload=forwarded, timeout=5.0)
+        if (
+            result.get("ok") is not True
+            or result.get("execution_owner") != "GUI_TEST_PC"
+            or result.get("relayed_to") != "GUI_TEST_PC"
+        ):
+            raise GuiTestPcInputError("GUI_TEST_PC live input response identity is invalid")
+        return result
+
+    def _request(
+        self,
+        path: str,
+        *,
+        method: str,
+        payload: dict[str, object] | None = None,
+        timeout: float,
+    ) -> dict[str, object]:
+        body = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = Request(
+            self.base_url + path,
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                error_payload = json.loads(raw)
+                message = str(error_payload.get("error") or f"HTTP {exc.code}")
+            except json.JSONDecodeError:
+                message = f"GUI_TEST_PC live input failed: HTTP {exc.code}"
+            raise GuiTestPcInputError(message, status=exc.code) from exc
+        except (OSError, URLError) as exc:
+            raise GuiTestPcInputError(f"GUI_TEST_PC live input is unavailable: {exc}") from exc
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise GuiTestPcInputError("GUI_TEST_PC live input returned invalid JSON") from exc
+        if not isinstance(decoded, dict):
+            raise GuiTestPcInputError("GUI_TEST_PC live input response must be a JSON object")
+        return decoded
 
 
 class StreamPublisherController:
@@ -474,6 +556,7 @@ class Handler(BaseHTTPRequestHandler):
     slots = list(range(1, 16))
     input_token = ""
     input_controller: PicoStreamInputController | None = None
+    input_relay: GuiTestPcInputRelay | None = None
     publisher_controller: StreamPublisherController | None = None
 
     def log_message(self, _format: str, *_args: object) -> None:
@@ -497,12 +580,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/api/v1/health"):
             payload = sources_payload(self.slots)
+            payload["input"] = self._input_status()
             payload["service"] = "oplink-pc-no-zego-slots-1-15"
             payload["all_sources_ready"] = all(item["ok"] for item in payload["sources"])
             self._json(payload)
             return
         if path == "/api/v1/sources":
-            self._json(sources_payload(self.slots))
+            payload = sources_payload(self.slots)
+            payload["input"] = self._input_status()
+            self._json(payload)
             return
         if path == "/api/v1/active":
             if not self.publisher_controller:
@@ -514,6 +600,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.publisher_controller.status())
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _input_status(self) -> dict[str, object]:
+        if self.input_relay is not None:
+            try:
+                return self.input_relay.health()
+            except GuiTestPcInputError as exc:
+                return {
+                    "enabled": False,
+                    "token_required": True,
+                    "report_mode": "gui_test_pc_unavailable",
+                    "measurement": "disabled",
+                    "execution_owner": "GUI_TEST_PC",
+                    "relayed_to": "GUI_TEST_PC",
+                    "error": str(exc),
+                }
+        return dict(load_runtime_state().get("input", {"enabled": False}))
 
     def _read_json_body(self) -> dict[str, object]:
         length = int(self.headers.get("Content-Length", "0"))
@@ -547,7 +649,7 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/v1/input":
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
-        if not self.input_controller or not self.input_token:
+        if (not self.input_controller and not self.input_relay) or not self.input_token:
             self._json({"ok": False, "error": "Pico input is disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
         authorization = self.headers.get("Authorization", "")
@@ -557,8 +659,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json_body()
             slot = int(payload.get("slot") or 0)
-            result = self.input_controller.handle(payload, source_identity(slot))
+            if self.input_relay is not None:
+                result = self.input_relay.handle(payload)
+            elif self.input_controller is not None:
+                result = self.input_controller.handle(payload, source_identity(slot))
+            else:
+                raise PicoStreamInputError("Pico input is disabled")
             self._json(result)
+        except GuiTestPcInputError as exc:
+            self._json({"ok": False, "error": str(exc)}, HTTPStatus(exc.status))
         except (ValueError, json.JSONDecodeError, PicoStreamInputError) as exc:
             self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
@@ -571,6 +680,7 @@ def main() -> int:
     parser.add_argument("--probe", type=int)
     parser.add_argument("--pico-config")
     parser.add_argument("--input-token-file")
+    parser.add_argument("--gui-input-url")
     parser.add_argument("--pico-health", action="store_true")
     parser.add_argument("--ffmpeg")
     parser.add_argument("--encoder", choices=("nvenc", "mf", "x264"), default="x264")
@@ -592,6 +702,7 @@ def main() -> int:
         return 0
     Handler.slots = slots
     Handler.input_controller = controller
+    Handler.input_relay = GuiTestPcInputRelay(args.gui_input_url) if args.gui_input_url else None
     if args.input_token_file:
         Handler.input_token = Path(args.input_token_file).read_text(encoding="utf-8").strip()
     publisher_controller = None
