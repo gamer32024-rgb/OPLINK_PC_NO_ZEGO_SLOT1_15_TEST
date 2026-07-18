@@ -276,7 +276,8 @@ try {
         ) + $encoderArgs + @(
             "-b:v", "${BitrateKbps}k", "-maxrate", "${BitrateKbps}k",
             "-bufsize", "$([Math]::Max(250, [int]($BitrateKbps / 5)))k",
-            "-g", "$Fps", "-keyint_min", "$Fps", "-sc_threshold", "0",
+            "-g", "$([Math]::Max(1, [int]($Fps / 2)))",
+            "-keyint_min", "$([Math]::Max(1, [int]($Fps / 2)))", "-sc_threshold", "0",
             "-f", "rtsp", "-rtsp_transport", "tcp", "rtsp://127.0.0.1:8554/$pathName"
         )
         $publisher = Start-HiddenProcess -FilePath $FFmpeg -Arguments $ffmpegArgs `
