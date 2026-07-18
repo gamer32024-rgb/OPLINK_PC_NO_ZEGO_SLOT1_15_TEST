@@ -9,11 +9,11 @@ This isolated proof of concept compares native Windows game `.EXE` slots 1 and 1
 | Sources | Slot 1 and slot 15 only |
 | Identity | GUI_TEST_PC launcher PID map, with `[01]`/`[15]` title fallback |
 | Capture | FFmpeg `gfxcapture` by exact verified game HWND |
-| Output | H.264, `1280x720`, 30 fps, 4 Mbps |
+| Output | H.264, `1920x1080`, 30 fps, 6 Mbps |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
 | Network | Tailscale Serve for WHEP signaling; media ICE advertises only the host Tailscale IPv4 |
 | Switch target | First rendered frame within 1000 ms |
-| Playback target | Rendered 30 fps; 720p is the minimum acceptance gate |
+| Playback target | Rendered 30 fps at 1080p |
 | Input target | iPhone-to-host round trip below 300 ms; host-to-Pico ACK reported separately |
 | Underlay gate | Both the best physical route and the overall default route must be wired Ethernet; USB sharing and VPN default routes are rejected |
 
@@ -24,7 +24,7 @@ Measured on 2026-07-17 at Windows display scale 150%:
 | 1 | 512x288 | 768x432 | 16:9 |
 | 15 | 384x216 | 576x324 | 16:9 |
 
-The source sizes differ, but the aspect ratio does not. The host normalizes both streams to 720p and publishes the original geometry as metadata. The iOS app never hard-codes either source size.
+The source sizes differ, but the aspect ratio does not. The host normalizes both streams to 1080p and publishes the original geometry as metadata. The iOS app never hard-codes either source size.
 
 The host reads `D:\15game\gui_test_pc_slot_pids.json` by default, verifies the mapped PID belongs to `StarCG.exe`, and reapplies `[01]` through `[15]` titles before capture. Pass `-SlotPidMapPath` if the launcher map moves. Window position is never used to guess slot identity.
 
@@ -46,6 +46,8 @@ cd host
 ```
 
 Acceptance mode is strict. If Surfshark or another VPN owns the overall default route, startup stops before capture begins. `-AllowVpnDefaultRoute` exists only for development and must not be used for the Ethernet acceptance test.
+
+For a stream-only test while GUI_TEST_PC owns Pico `COM5`, use `-DisableInput`. This prevents the streaming host from opening Pico and the iOS app keeps its touch overlay disabled. Release `COM5` and restart without `-DisableInput` before measuring input latency.
 
 If MediaMTX is not installed in the ignored tools directory:
 
