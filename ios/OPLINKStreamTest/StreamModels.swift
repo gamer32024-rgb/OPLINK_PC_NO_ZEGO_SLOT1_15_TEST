@@ -64,6 +64,29 @@ struct StreamInputRequest: Encodable {
     }
 }
 
+struct StreamActivateRequest: Encodable {
+    let slot: Int
+}
+
+struct StreamActivateResponse: Decodable {
+    let ok: Bool
+    let mode: String
+    let encoder: String
+    let activeSlot: Int
+    let publisherPID: Int?
+    let publisherAlive: Bool
+    let reused: Bool
+    let activationMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case ok, mode, encoder, reused
+        case activeSlot = "active_slot"
+        case publisherPID = "publisher_pid"
+        case publisherAlive = "publisher_alive"
+        case activationMs = "activation_ms"
+    }
+}
+
 struct StreamInputResponse: Decodable {
     let ok: Bool
     let slot: Int
@@ -143,6 +166,10 @@ enum StreamEndpoint {
 
     static func sources(base: URL) -> URL {
         replacingPath(base, with: "/oplink-test/api/v1/sources")
+    }
+
+    static func activate(base: URL) -> URL {
+        replacingPath(base, with: "/oplink-test/api/v1/activate")
     }
 
     static func whep(base: URL, slot: Int) -> URL {

@@ -1,56 +1,61 @@
 # OPLINK_PC No-ZEGO Slots 1-15 Test
 
-This isolated native iOS proof of concept streams Windows game `.EXE` slots 1 through 15 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, CPU screenshots, or desktop-region capture.
+This native iOS proof of concept streams Windows game `.EXE` slots 1 through 15 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, CPU screenshots, or desktop-region capture.
 
 The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The phone only submits bridge commands. `GUI_TEST_PC` remains the sole owner of module execution, foreground-window scheduling, Pico HID output, cancellation, and launcher actions.
 
-## Fixed test parameters
+## Streaming architecture
 
-| Item | Test rule |
+| Item | Rule |
 |---|---|
-| Sources | Exact verified HWNDs for slots 1 through 15 |
+| Selectable sources | Exact verified HWNDs for slots 1 through 15 |
 | Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[15]` title fallback |
 | Capture | FFmpeg `gfxcapture` Windows Graphics Capture by HWND; occluded windows remain observable |
-| Current game client | `1920x1080` for every slot, stacked at the same desktop position |
-| Output | H.264, `1920x1080`, 30 fps, 6 Mbps per publisher |
+| Current source geometry | `1280x720` logical at 150% DPI, producing `1920x1080` WGC frames |
+| Publisher | One hardware H.264 publisher for the slot currently selected by the iPhone |
+| Output | H.264 Constrained Baseline, `1920x1080`, 30 fps, 6 Mbps, no B-frames |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
 | Network | Tailscale Serve for HTTPS/WHEP; media ICE advertises only the host Tailscale IPv4 |
 | Switch target | First rendered frame within 1000 ms |
-| Playback target | Stable rendered 30 fps at 1080p |
 | Input target | iPhone-to-host round trip below 300 ms when direct input is explicitly enabled |
 | Control owner | `GUI_TEST_PC`; iOS only calls `/gui-test-pc/api/...` bridge endpoints |
 
-All 15 publishers run concurrently so the iPhone can keep observing a selected slot while `GUI_TEST_PC` changes the Windows foreground window for another slot. A desktop/front-window capture would follow the scheduler and is therefore not valid for this test. Host CPU/GPU load with all 15 publishers is an acceptance measurement, not an assumed result.
+The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows stops the old exact-HWND publisher, starts the new one, waits until its MediaMTX path is online, and then returns success.
 
-The host reads `D:\15game\gui_test_pc_slot_pids.json` by default, verifies each mapped PID belongs to `StarCG.exe`, and reapplies `[01]` through `[15]` titles before capture. Pass `-SlotPidMapPath` if the launcher map moves. Window position is never used to guess slot identity.
+This design is required on the current host. A live 15-publisher trial reached the NVIDIA hardware-session ceiling after eight sessions, while 15 concurrent `libx264` publishers could not maintain 30 fps. The single-active publisher keeps the correct observation behavior during GUI_TEST_PC playback without wasting 15 encoder sessions.
+
+Measured locally on 2026-07-18:
+
+- all slots 1 through 15 activated successfully;
+- non-reused publisher activation averaged about 357 ms and never exceeded 396 ms;
+- exactly one FFmpeg process remained alive throughout the sweep;
+- RTSP probe reported H.264 Constrained Baseline, `1920x1080`, `30/1` fps, and zero B-frames.
+
+These are host-side measurements. The final switch acceptance gate remains the native iPhone first-rendered-frame measurement.
 
 ## Windows host
 
 Prerequisites:
 
 - All 15 game windows are running and registered in the GUI_TEST_PC PID map.
-- Every game client is `1920x1080` and accepted by the active GUI_TEST_PC layout policy.
+- Every source is 16:9 and accepted by the active GUI_TEST_PC layout policy.
 - Tailscale is connected on Windows and iPhone.
 - FFmpeg includes the `gfxcapture` filter.
 - MediaMTX is available at `host/tools/mediamtx/mediamtx.exe`, or passed with `-MediaMTXPath`.
 - `GUI_TEST_PC` is running when the iOS bridge controls are used.
 
-Start all 15 publishers from PowerShell:
+Start the host from PowerShell:
 
 ```powershell
 cd host
 .\start_stream_test.ps1 -ConfigureTailscaleServe -DisableInput
 ```
 
-`-DisableInput` is the required mode while `GUI_TEST_PC` owns Pico `COM5` for module playback. It prevents the streaming host from opening Pico and leaves direct iOS touch disabled. The module/launcher controls still work because they submit bridge commands to `GUI_TEST_PC` rather than writing HID reports themselves.
+`-DisableInput` is the required mode while `GUI_TEST_PC` owns Pico `COM5` for module playback. It prevents the streaming host from opening Pico and leaves direct iOS touch disabled. Module and launcher controls still work because they submit bridge commands to `GUI_TEST_PC` rather than writing HID reports themselves.
+
+The encoder selection order is live-probed NVIDIA NVENC, then hardware Media Foundation H.264, then one `libx264` fallback. The current FFmpeg NVENC API is newer than the installed NVIDIA driver API, so this host selects `h264_mf`, which uses the NVIDIA H.264 Encoder MFT.
 
 Acceptance mode is strict. If Surfshark or another VPN owns the overall default route, startup stops before capture begins. `-AllowVpnDefaultRoute` exists only for development and must not be treated as Ethernet acceptance.
-
-If MediaMTX is not installed in the ignored tools directory:
-
-```powershell
-.\install_mediamtx.ps1
-```
 
 Stop only the processes recorded by this project:
 
@@ -88,7 +93,7 @@ The app provides:
 - a 10-step module chain showing module names only;
 - single-slot cancel without stopping other slots;
 - start, stop, restart, and window-arrange bridge controls;
-- live 1080p/FPS/switch-time metrics.
+- live 1080p/FPS/host-activation/first-frame switch metrics.
 
 The Tailnet HTTPS host is required. The input pairing token is optional and can remain blank for stream observation plus GUI bridge control.
 

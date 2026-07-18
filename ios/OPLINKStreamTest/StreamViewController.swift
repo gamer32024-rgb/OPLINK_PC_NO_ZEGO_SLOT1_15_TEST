@@ -38,6 +38,7 @@ final class StreamViewController: UIViewController {
     private var renderedSize = CGSize.zero
     private var renderedFPS = 0
     private var lastSwitchMilliseconds: Int?
+    private var lastPublisherActivationMilliseconds: Int?
     private var lastInputRTTMilliseconds: Int?
     private var lastHostToHIDMilliseconds: Double?
     private var lastInputBackend = "disabled"
@@ -330,6 +331,7 @@ final class StreamViewController: UIViewController {
         let sequence = connectionSequence
         switchStartedAt = Date()
         lastSwitchMilliseconds = nil
+        lastPublisherActivationMilliseconds = nil
         renderedFPS = 0
         renderedSize = .zero
         lastInputRTTMilliseconds = nil
@@ -342,6 +344,20 @@ final class StreamViewController: UIViewController {
         refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
+
+        if let response = latestResponse,
+           let source = response.sources.first(where: { $0.slot == slot }),
+           source.ok,
+           source.aspectIs16x9 == true {
+            activateVerifiedSource(
+                source,
+                response: response,
+                baseURL: baseURL,
+                slot: slot,
+                sequence: sequence
+            )
+            return
+        }
 
         streamAPI.fetchSources(baseURL: baseURL) { [weak self] result in
             DispatchQueue.main.async {
@@ -362,7 +378,44 @@ final class StreamViewController: UIViewController {
                         self.setStatus("拒絕非 16:9 來源", good: false)
                         return
                     }
-                    self.updateSourceLabel(source: source, response: response)
+                    self.activateVerifiedSource(
+                        source,
+                        response: response,
+                        baseURL: baseURL,
+                        slot: slot,
+                        sequence: sequence
+                    )
+                }
+            }
+        }
+    }
+
+    private func activateVerifiedSource(
+        _ source: StreamSource,
+        response: StreamSourcesResponse,
+        baseURL: URL,
+        slot: Int,
+        sequence: Int
+    ) {
+        updateSourceLabel(source: source, response: response)
+        setStatus("切換主機 publisher 至 Slot \(slot)", good: false)
+        streamAPI.activate(baseURL: baseURL, slot: slot) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, sequence == self.connectionSequence else { return }
+                switch result {
+                case .failure(let error):
+                    self.latestResponse = nil
+                    self.setStatus(error.localizedDescription, good: false)
+                case .success(let activation):
+                    guard activation.ok,
+                          activation.publisherAlive,
+                          activation.activeSlot == slot else {
+                        self.latestResponse = nil
+                        self.setStatus("主機未能啟動 Slot \(slot) publisher", good: false)
+                        return
+                    }
+                    self.lastPublisherActivationMilliseconds = activation.activationMs
+                    self.updateMetrics()
                     self.whepClient.connect(
                         endpoint: StreamEndpoint.whep(base: baseURL, slot: slot),
                         renderer: self.frameMonitor
@@ -407,9 +460,10 @@ final class StreamViewController: UIViewController {
             ? "0x0"
             : "\(Int(renderedSize.width))x\(Int(renderedSize.height))"
         let switchText = lastSwitchMilliseconds.map { "\($0)ms" } ?? "--"
+        let activationText = lastPublisherActivationMilliseconds.map { "\($0)ms" } ?? "--"
         let inputRTT = lastInputRTTMilliseconds.map { "\($0)ms" } ?? "--"
         let hostToHID = lastHostToHIDMilliseconds.map { String(format: "%.1fms", $0) } ?? "--"
-        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nINPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
+        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nPUBLISHER \(activationText)   INPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
         if let switchMs = lastSwitchMilliseconds {
             targetLabel.textColor = switchMs <= 1000
                 ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)

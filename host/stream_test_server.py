@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import ctypes
 import json
 import os
 import re
+import subprocess
+import threading
 import time
 from ctypes import wintypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 
@@ -226,10 +231,250 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
     }
 
 
+class StreamPublisherError(RuntimeError):
+    pass
+
+
+class StreamPublisherController:
+    def __init__(
+        self,
+        *,
+        ffmpeg: str,
+        encoder: str,
+        width: int,
+        height: int,
+        fps: int,
+        bitrate_kbps: int,
+        mediamtx_api: str,
+    ) -> None:
+        self.ffmpeg = str(Path(ffmpeg).resolve())
+        self.encoder = encoder
+        self.width = int(width)
+        self.height = int(height)
+        self.fps = int(fps)
+        self.bitrate_kbps = int(bitrate_kbps)
+        self.mediamtx_api = mediamtx_api.rstrip("/")
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen[bytes] | None = None
+        self._stdout_handle = None
+        self._stderr_handle = None
+        self._active_slot: int | None = None
+        self._activated_at: str | None = None
+        self._last_activation_ms: int | None = None
+        self._state_path = RUNTIME / "active_publisher.json"
+
+    def _path_name(self, slot: int) -> str:
+        return f"slot{slot:02d}"
+
+    def _path_online(self, slot: int) -> bool:
+        url = f"{self.mediamtx_api}/v3/paths/get/{self._path_name(slot)}"
+        try:
+            with urlopen(url, timeout=0.25) as response:
+                return response.status == HTTPStatus.OK
+        except (HTTPError, URLError, TimeoutError, OSError):
+            return False
+
+    def _publisher_args(self, identity: dict[str, object]) -> list[str]:
+        hwnd = int(identity["hwnd"])
+        capture = (
+            f"gfxcapture=hwnd={hwnd}:capture_cursor=0:capture_border=0:"
+            f"max_framerate={self.fps}:resize_mode=scale"
+        )
+        expected = identity.get("capture_physical_expected") or {}
+        expected_width = int(expected.get("w") or 0) if isinstance(expected, dict) else 0
+        expected_height = int(expected.get("h") or 0) if isinstance(expected, dict) else 0
+        pixel_format = "nv12" if self.encoder in {"nvenc", "mf"} else "yuv420p"
+        video_filter = (
+            f"hwdownload,format=bgra,scale={self.width}:{self.height}:"
+            f"flags=bilinear,format={pixel_format}"
+        )
+        args = [
+            self.ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-f",
+            "lavfi",
+            "-i",
+            capture,
+            "-an",
+        ]
+        if self.encoder == "nvenc":
+            args += [
+                "-vf",
+                video_filter,
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "p1",
+                "-tune",
+                "ull",
+                "-rc",
+                "cbr",
+            ]
+        elif self.encoder == "mf":
+            if expected_width != self.width or expected_height != self.height:
+                args += ["-vf", video_filter]
+            args += [
+                "-c:v",
+                "h264_mf",
+                "-hw_encoding",
+                "1",
+                "-rate_control",
+                "cbr",
+                "-scenario",
+                "display_remoting",
+                "-bf",
+                "0",
+            ]
+        else:
+            args += [
+                "-vf",
+                video_filter,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+            ]
+        args += [
+            "-fps_mode",
+            "cfr",
+            "-r",
+            str(self.fps),
+            "-b:v",
+            f"{self.bitrate_kbps}k",
+            "-maxrate",
+            f"{self.bitrate_kbps}k",
+            "-bufsize",
+            f"{max(250, self.bitrate_kbps // 5)}k",
+            "-g",
+            str(max(1, self.fps // 2)),
+        ]
+        if self.encoder != "mf":
+            args += ["-keyint_min", str(max(1, self.fps // 2)), "-sc_threshold", "0"]
+        args += [
+            "-f",
+            "rtsp",
+            "-rtsp_transport",
+            "tcp",
+            f"rtsp://127.0.0.1:8554/{self._path_name(int(identity['slot']))}",
+        ]
+        return args
+
+    def _write_state(self) -> None:
+        payload = self.status()
+        temp_path = self._state_path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(self._state_path)
+
+    def _log_tail(self, slot: int, lines: int = 20) -> str:
+        path = RUNTIME / f"{self._path_name(slot)}.ffmpeg.err.log"
+        try:
+            return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+        except OSError:
+            return ""
+
+    def _stop_locked(self) -> None:
+        process = self._process
+        self._process = None
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1.0)
+        for handle_name in ("_stdout_handle", "_stderr_handle"):
+            handle = getattr(self, handle_name)
+            if handle:
+                handle.close()
+                setattr(self, handle_name, None)
+        self._active_slot = None
+        self._activated_at = None
+        if self._state_path.exists():
+            self._state_path.unlink(missing_ok=True)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_locked()
+
+    def status(self) -> dict[str, object]:
+        process = self._process
+        alive = process is not None and process.poll() is None
+        return {
+            "ok": True,
+            "mode": "single_active_publisher",
+            "encoder": self.encoder,
+            "active_slot": self._active_slot if alive else None,
+            "publisher_pid": process.pid if alive and process else None,
+            "publisher_alive": alive,
+            "activated_at": self._activated_at if alive else None,
+            "last_activation_ms": self._last_activation_ms,
+        }
+
+    def activate(self, slot: int) -> dict[str, object]:
+        identity = source_identity(slot)
+        if not identity.get("ok"):
+            raise StreamPublisherError(str(identity.get("error") or f"slot {slot} is unavailable"))
+        if identity.get("aspect_is_16_9") is not True:
+            raise StreamPublisherError(f"slot {slot} is not 16:9")
+
+        with self._lock:
+            if (
+                self._active_slot == slot
+                and self._process is not None
+                and self._process.poll() is None
+                and self._path_online(slot)
+            ):
+                return {**self.status(), "reused": True, "activation_ms": 0}
+
+            self._stop_locked()
+            started = time.perf_counter()
+            path_name = self._path_name(slot)
+            stdout_path = RUNTIME / f"{path_name}.ffmpeg.out.log"
+            stderr_path = RUNTIME / f"{path_name}.ffmpeg.err.log"
+            self._stdout_handle = stdout_path.open("wb")
+            self._stderr_handle = stderr_path.open("wb")
+            self._process = subprocess.Popen(
+                self._publisher_args(identity),
+                cwd=str(ROOT),
+                stdout=self._stdout_handle,
+                stderr=self._stderr_handle,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self._active_slot = slot
+            deadline = time.perf_counter() + 3.0
+            while time.perf_counter() < deadline:
+                if self._process.poll() is not None:
+                    tail = self._log_tail(slot)
+                    self._stop_locked()
+                    raise StreamPublisherError(
+                        f"slot {slot} publisher exited during activation"
+                        + (f": {tail}" if tail else "")
+                    )
+                if self._path_online(slot):
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    self._activated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    self._last_activation_ms = elapsed_ms
+                    self._write_state()
+                    return {**self.status(), "reused": False, "activation_ms": elapsed_ms}
+                time.sleep(0.04)
+
+            tail = self._log_tail(slot)
+            self._stop_locked()
+            raise StreamPublisherError(
+                f"slot {slot} publisher did not reach MediaMTX within 3000 ms"
+                + (f": {tail}" if tail else "")
+            )
+
+
 class Handler(BaseHTTPRequestHandler):
     slots = list(range(1, 16))
     input_token = ""
     input_controller: PicoStreamInputController | None = None
+    publisher_controller: StreamPublisherController | None = None
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -259,12 +504,46 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/sources":
             self._json(sources_payload(self.slots))
             return
+        if path == "/api/v1/active":
+            if not self.publisher_controller:
+                self._json(
+                    {"ok": False, "error": "stream publisher controller is disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            else:
+                self._json(self.publisher_controller.status())
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _read_json_body(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 16_384:
+            raise ValueError("invalid request body length")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        return payload
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         if path.startswith("/oplink-test/"):
             path = path.removeprefix("/oplink-test")
+        if path == "/api/v1/activate":
+            if not self.publisher_controller:
+                self._json(
+                    {"ok": False, "error": "stream publisher controller is disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                payload = self._read_json_body()
+                slot = int(payload.get("slot") or 0)
+                if slot not in self.slots:
+                    raise ValueError(f"slot must be one of {self.slots}")
+                self._json(self.publisher_controller.activate(slot))
+            except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
+                self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
         if path != "/api/v1/input":
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -276,12 +555,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "invalid pairing token"}, HTTPStatus.UNAUTHORIZED)
             return
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 16_384:
-                raise ValueError("invalid request body length")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise ValueError("request body must be a JSON object")
+            payload = self._read_json_body()
             slot = int(payload.get("slot") or 0)
             result = self.input_controller.handle(payload, source_identity(slot))
             self._json(result)
@@ -298,6 +572,13 @@ def main() -> int:
     parser.add_argument("--pico-config")
     parser.add_argument("--input-token-file")
     parser.add_argument("--pico-health", action="store_true")
+    parser.add_argument("--ffmpeg")
+    parser.add_argument("--encoder", choices=("nvenc", "mf", "x264"), default="x264")
+    parser.add_argument("--width", type=int, default=1920)
+    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--bitrate-kbps", type=int, default=6000)
+    parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
     args = parser.parse_args()
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
     if args.probe is not None:
@@ -313,9 +594,27 @@ def main() -> int:
     Handler.input_controller = controller
     if args.input_token_file:
         Handler.input_token = Path(args.input_token_file).read_text(encoding="utf-8").strip()
+    publisher_controller = None
+    if args.ffmpeg:
+        publisher_controller = StreamPublisherController(
+            ffmpeg=args.ffmpeg,
+            encoder=args.encoder,
+            width=args.width,
+            height=args.height,
+            fps=args.fps,
+            bitrate_kbps=args.bitrate_kbps,
+            mediamtx_api=args.mediamtx_api,
+        )
+        Handler.publisher_controller = publisher_controller
+        atexit.register(publisher_controller.stop)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Metadata service listening on http://{args.host}:{args.port}", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        if publisher_controller:
+            publisher_controller.stop()
     return 0
 
 

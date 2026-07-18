@@ -7,7 +7,7 @@ param(
     [int]$Fps = 30,
     [ValidateRange(250, 20000)]
     [int]$BitrateKbps = 6000,
-    [ValidateSet("auto", "nvenc", "x264")]
+    [ValidateSet("auto", "nvenc", "mf", "x264")]
     [string]$Encoder = "auto",
     [string]$FFmpegPath,
     [string]$MediaMTXPath,
@@ -72,6 +72,17 @@ function Start-HiddenProcess {
 }
 
 function Stop-StartedProcesses {
+    $activePublisherPath = Join-Path $Runtime "active_publisher.json"
+    if (Test-Path -LiteralPath $activePublisherPath) {
+        try {
+            $activePublisher = Get-Content -LiteralPath $activePublisherPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($activePublisher.publisher_pid) {
+                Stop-Process -Id ([int]$activePublisher.publisher_pid) -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+        Remove-Item -LiteralPath $activePublisherPath -Force -ErrorAction SilentlyContinue
+    }
     foreach ($process in $startedProcesses) {
         if ($process -and !$process.HasExited) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -244,6 +255,24 @@ if ($Encoder -eq "auto" -or $Encoder -eq "nvenc") {
     } elseif ($Encoder -eq "nvenc") {
         throw "NVENC was explicitly requested but the live encoder probe failed. See $nvencProbeLog"
     } else {
+        $selectedEncoder = "mf"
+    }
+}
+if ($selectedEncoder -eq "mf") {
+    $probeIdentity = $identities | Where-Object slot -eq 1 | Select-Object -First 1
+    $probeFilter = "gfxcapture=hwnd=$($probeIdentity.hwnd):capture_cursor=0:capture_border=0:max_framerate=${Fps}:resize_mode=scale"
+    $mfProbeLog = Join-Path $Runtime "mf_probe.err.log"
+    $savedErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $FFmpeg -hide_banner -loglevel info -f lavfi -i $probeFilter -frames:v 10 -an `
+        -c:v h264_mf -hw_encoding 1 -rate_control cbr -scenario display_remoting `
+        -b:v "${BitrateKbps}k" -g "$([Math]::Max(1, [int]($Fps / 2)))" -bf 0 -f null NUL 2> $mfProbeLog
+    $mfExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedErrorActionPreference
+    if ($mfExitCode -ne 0) {
+        if ($Encoder -eq "mf") {
+            throw "Media Foundation hardware H.264 was explicitly requested but the live probe failed. See $mfProbeLog"
+        }
         $selectedEncoder = "x264"
     }
 }
@@ -254,43 +283,21 @@ try {
     Start-Sleep -Milliseconds 750
     if ($media.HasExited) { throw "MediaMTX exited during startup." }
 
-    $apiArguments = @($ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort")
+    $apiArguments = @(
+        $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
+        "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
+        "--width", "$profileWidth", "--height", "$profileHeight",
+        "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps"
+    )
     if (!$DisableInput) {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
     }
     $api = Start-HiddenProcess -FilePath $Python -Arguments $apiArguments `
         -StdoutPath (Join-Path $Runtime "api.out.log") -StderrPath (Join-Path $Runtime "api.err.log")
 
-    $publishers = @()
-    foreach ($identity in $identities) {
-        $slot = [int]$identity.slot
-        $pathName = "slot{0:D2}" -f $slot
-        $captureFilter = "gfxcapture=hwnd=$($identity.hwnd):capture_cursor=0:capture_border=0:max_framerate=${Fps}:resize_mode=scale"
-        $pixelFormat = if ($selectedEncoder -eq "nvenc") { "nv12" } else { "yuv420p" }
-        $videoFilter = "hwdownload,format=bgra,scale=${profileWidth}:${profileHeight}:flags=bilinear,format=$pixelFormat"
-        $encoderArgs = if ($selectedEncoder -eq "nvenc") {
-            @("-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-rc", "cbr")
-        } else {
-            @("-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency")
-        }
-        $ffmpegArgs = @(
-            "-hide_banner", "-loglevel", "info", "-f", "lavfi", "-i", $captureFilter,
-            "-an", "-vf", $videoFilter
-        ) + $encoderArgs + @(
-            "-b:v", "${BitrateKbps}k", "-maxrate", "${BitrateKbps}k",
-            "-bufsize", "$([Math]::Max(250, [int]($BitrateKbps / 5)))k",
-            "-g", "$([Math]::Max(1, [int]($Fps / 2)))",
-            "-keyint_min", "$([Math]::Max(1, [int]($Fps / 2)))", "-sc_threshold", "0",
-            "-f", "rtsp", "-rtsp_transport", "tcp", "rtsp://127.0.0.1:8554/$pathName"
-        )
-        $publisher = Start-HiddenProcess -FilePath $FFmpeg -Arguments $ffmpegArgs `
-            -StdoutPath (Join-Path $Runtime "$pathName.ffmpeg.out.log") `
-            -StderrPath (Join-Path $Runtime "$pathName.ffmpeg.err.log")
-        $publishers += [ordered]@{ slot = $slot; pid = $publisher.Id; path = $pathName }
-    }
-
     $state = [ordered]@{
         started_at = (Get-Date).ToUniversalTime().ToString("o")
+        publisher_mode = "single_active_publisher"
         profile = [ordered]@{
             encoded = [ordered]@{ w = $profileWidth; h = $profileHeight }
             fps = $Fps
@@ -326,7 +333,7 @@ try {
         pids = [ordered]@{
             mediamtx = $media.Id
             api = $api.Id
-            publishers = $publishers
+            publishers = @()
         }
     }
     [System.IO.File]::WriteAllText($StatePath, ($state | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
@@ -344,8 +351,14 @@ try {
     }
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/health" -TimeoutSec 5
     if (!$health.all_sources_ready) { throw "The metadata service reports that a source is no longer ready." }
+    $activation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ApiPort/api/v1/activate" `
+        -ContentType "application/json" -Body (@{ slot = 1 } | ConvertTo-Json -Compress) -TimeoutSec 8
+    if (!$activation.publisher_alive -or [int]$activation.active_slot -ne 1) {
+        throw "The single active publisher did not activate slot 1."
+    }
 
     Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
+    Write-Host "Publisher: single-active slot 1 | activation=$($activation.activation_ms)ms"
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `

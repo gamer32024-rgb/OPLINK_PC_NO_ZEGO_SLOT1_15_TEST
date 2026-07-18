@@ -28,6 +28,35 @@ final class StreamAPI {
         }.resume()
     }
 
+    func activate(
+        baseURL: URL,
+        slot: Int,
+        completion: @escaping (Result<StreamActivateResponse, Error>) -> Void
+    ) {
+        var request = URLRequest(url: StreamEndpoint.activate(base: baseURL))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(StreamActivateRequest(slot: slot))
+        request.timeoutInterval = 5
+        session.dataTask(with: request) { data, response, error in
+            if let error { completion(.failure(error)); return }
+            guard let http = response as? HTTPURLResponse, let data else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+                completion(.failure(StreamInputError.rejected(message ?? "Activate failed: HTTP \(http.statusCode)")))
+                return
+            }
+            do {
+                completion(.success(try JSONDecoder().decode(StreamActivateResponse.self, from: data)))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
     func sendInput(
         baseURL: URL,
         token: String,
