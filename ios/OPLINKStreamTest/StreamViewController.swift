@@ -160,7 +160,7 @@ final class StreamViewController: UIViewController {
         metricsLabel.numberOfLines = 2
         targetLabel.font = .systemFont(ofSize: 10, weight: .bold)
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
-        targetLabel.text = "TARGET 720P / 30 FPS / SWITCH < 1000 MS / INPUT RTT < 300 MS"
+        targetLabel.text = "TARGET 1080P / 30 FPS / SWITCH < 1000 MS / INPUT RTT < 300 MS"
 
         let metricsStack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
         metricsStack.axis = .vertical
@@ -194,6 +194,7 @@ final class StreamViewController: UIViewController {
             }
             self.switchStartedAt = nil
             self.touchOverlay.isUserInteractionEnabled = self.configuredInputToken() != nil
+                && self.latestResponse?.input.enabled == true
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
         }
