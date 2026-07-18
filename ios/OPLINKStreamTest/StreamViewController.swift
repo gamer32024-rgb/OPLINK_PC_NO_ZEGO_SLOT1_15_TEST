@@ -543,8 +543,7 @@ final class StreamViewController: UIViewController {
                 self.lastSwitchMilliseconds = Int(Date().timeIntervalSince(switchStartedAt) * 1000)
             }
             self.switchStartedAt = nil
-            self.touchOverlay.isUserInteractionEnabled = self.configuredInputToken() != nil
-                && self.latestResponse?.input.enabled == true
+            self.touchOverlay.isUserInteractionEnabled = self.latestResponse?.input.enabled == true
                 && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
@@ -883,8 +882,17 @@ final class StreamViewController: UIViewController {
     }
 
     private func enqueueRemoteInput(_ request: StreamInputRequest) {
-        guard configuredBaseURL() != nil, configuredInputToken() != nil else {
-            setStatus("尚未設定 input pairing token", good: false)
+        guard configuredBaseURL() != nil else {
+            setStatus("Tailnet host URL is required", good: false)
+            showInputToast("HOST URL REQUIRED", good: false)
+            closeKeyboardPanel()
+            presentHostSettings()
+            return
+        }
+        guard configuredInputToken() != nil else {
+            setStatus("Input pairing token is required", good: false)
+            showInputToast("INPUT TOKEN REQUIRED", good: false)
+            closeKeyboardPanel()
             presentHostSettings()
             return
         }
@@ -1175,7 +1183,7 @@ final class StreamViewController: UIViewController {
             title: "Tailnet Windows 主機",
             message: clearToken
                 ? "Input pairing token 已失效。請輸入 Windows 串流主機目前顯示的 token；不要輸入 Tailscale auth key。"
-                : "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 供即時觸控與鍵盤使用，觀看模組播放時可留空。不要輸入 Tailscale auth key。",
+                : "HTTPS 主機供串流及 GUI_TEST_PC bridge 使用。Input pairing token 在使用觸控或鍵盤控制時必填；純觀看才可留空。不要輸入 Tailscale auth key。",
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -1186,7 +1194,7 @@ final class StreamViewController: UIViewController {
             field.autocorrectionType = .no
         }
         alert.addTextField { field in
-            field.placeholder = "Input pairing token（可留空）"
+            field.placeholder = "Input pairing token（控制時必填）"
             field.text = clearToken ? "" : UserDefaults.standard.string(forKey: Defaults.inputToken)
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
@@ -1210,7 +1218,12 @@ final class StreamViewController: UIViewController {
                 self.setStatus(error.localizedDescription, good: false)
             }
         })
-        present(alert, animated: true)
+        let shouldFocusToken = clearToken || configuredInputToken() == nil
+        present(alert, animated: true) {
+            if shouldFocusToken {
+                alert.textFields?[1].becomeFirstResponder()
+            }
+        }
     }
 
     private func requestLandscape() {
