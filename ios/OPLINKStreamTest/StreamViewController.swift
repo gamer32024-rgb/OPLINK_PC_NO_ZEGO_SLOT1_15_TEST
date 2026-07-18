@@ -932,7 +932,7 @@ final class StreamViewController: UIViewController {
                         UserDefaults.standard.removeObject(forKey: Defaults.inputToken)
                         self.closeKeyboardPanel()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                            self?.presentHostSettings(clearToken: true)
+                            self?.showHostSettings(clearToken: true)
                         }
                     }
                 }
@@ -1166,10 +1166,10 @@ final class StreamViewController: UIViewController {
     }
 
     @objc private func presentHostSettings() {
-        presentHostSettings(clearToken: false)
+        showHostSettings(clearToken: false)
     }
 
-    private func presentHostSettings(clearToken: Bool) {
+    private func showHostSettings(clearToken: Bool) {
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(
             title: "Tailnet Windows 主機",
