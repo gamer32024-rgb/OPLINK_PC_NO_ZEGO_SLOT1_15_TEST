@@ -37,7 +37,11 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         layer.cornerRadius = expanded ? 21 : 19
         onExpandedChanged?(expanded)
 
-        let updates = { self.superview?.layoutIfNeeded() }
+        let updates: () -> Void = {
+            if let superview = self.superview {
+                superview.layoutIfNeeded()
+            }
+        }
         if animated {
             UIView.animate(
                 withDuration: 0.16,
