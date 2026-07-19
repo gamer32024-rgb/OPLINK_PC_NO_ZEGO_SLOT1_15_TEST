@@ -234,6 +234,12 @@ $networkUnderlay = Get-PhysicalUnderlayGate
 
 $profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
 $profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
+$layoutRepairText = & $Python $ServerScript --repair-stream-layout
+if ($LASTEXITCODE -ne 0) { throw "Could not refresh and validate the 15 game render surfaces." }
+$layoutRepair = $layoutRepairText | ConvertFrom-Json
+if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne 15) {
+    throw "The fixed 4K stacked stream layout preflight did not refresh all 15 slots."
+}
 $identities = @()
 foreach ($slot in $Slots) {
     $probeText = & $Python $ServerScript --probe $slot
@@ -361,6 +367,7 @@ try {
             bitrate_kbps = $BitrateKbps
         }
         encoder = $selectedEncoder
+        layout_refresh = $layoutRepair
         network_underlay = $networkUnderlay
         input = if ($inputMode -eq "disabled") {
             [ordered]@{
@@ -430,6 +437,7 @@ try {
     Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
     Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
+    Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/15 refreshed and fixed at 1920x1080 client"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `
             $identity.slot, $identity.hwnd, $identity.client_logical.w, $identity.client_logical.h, `

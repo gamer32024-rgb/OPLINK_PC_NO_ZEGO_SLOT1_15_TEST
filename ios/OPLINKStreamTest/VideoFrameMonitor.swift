@@ -9,7 +9,7 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         let framesSinceLastRead: Int
     }
 
-    var onFirstFrame: ((CGSize) -> Void)?
+    var onFirstFrame: ((CGSize, Int) -> Void)?
     var onSizeChanged: ((CGSize) -> Void)?
 
     private let target: RTCVideoRenderer
@@ -18,6 +18,7 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
     private var totalFrames = 0
     private var previousReadFrames = 0
     private var hasRenderedFrame = false
+    private var generation = 0
 
     init(target: RTCVideoRenderer) {
         self.target = target
@@ -40,19 +41,26 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         let isFirst = !hasRenderedFrame
         hasRenderedFrame = true
         let currentSize = size
+        let currentGeneration = generation
         lock.unlock()
         if isFirst {
-            DispatchQueue.main.async { [weak self] in self?.onFirstFrame?(currentSize) }
+            DispatchQueue.main.async { [weak self] in
+                self?.onFirstFrame?(currentSize, currentGeneration)
+            }
         }
     }
 
-    func reset() {
+    @discardableResult
+    func reset() -> Int {
         lock.lock()
+        generation += 1
         size = .zero
         totalFrames = 0
         previousReadFrames = 0
         hasRenderedFrame = false
+        let currentGeneration = generation
         lock.unlock()
+        return currentGeneration
     }
 
     func snapshot() -> Snapshot {
@@ -63,4 +71,3 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         return Snapshot(size: size, totalFrames: totalFrames, framesSinceLastRead: delta)
     }
 }
-

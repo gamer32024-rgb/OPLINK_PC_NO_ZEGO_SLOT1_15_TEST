@@ -47,5 +47,43 @@ class StreamViewerStateTests(unittest.TestCase):
             self.controller.viewer_update("active", None)
 
 
+class StreamPublisherPriorityTests(unittest.TestCase):
+    def test_prewarm_yields_before_starting_when_activation_is_pending(self) -> None:
+        controller = StreamPublisherController.__new__(StreamPublisherController)
+        controller.cache_size = 3
+        controller._lock = threading.RLock()
+        controller._activation_pending = threading.Event()
+        controller._activation_pending.set()
+        controller._processes = {}
+        controller._active_slot = None
+        controller._validate_slot = Mock(side_effect=lambda slot: {"slot": slot, "ok": True})
+        controller._start_slot_locked = Mock()
+        controller._prune_locked = Mock()
+        controller._write_state = Mock()
+        controller.status = Mock(return_value={"warm_slots": []})
+
+        result = controller.prewarm([1, 2, 3])
+
+        controller._start_slot_locked.assert_not_called()
+        self.assertTrue(result["interrupted_for_activation"])
+        self.assertEqual(result["activation_ms_by_slot"], {})
+
+    def test_prune_never_evicts_the_active_slot(self) -> None:
+        controller = StreamPublisherController.__new__(StreamPublisherController)
+        controller.cache_size = 3
+        controller._processes = {1: object(), 2: object(), 3: object(), 9: object()}
+        controller._active_slot = 9
+        controller._last_used = {1: 1.0, 2: 2.0, 3: 3.0, 9: 0.0}
+
+        def stop(slot: int) -> None:
+            controller._processes.pop(slot)
+
+        controller._stop_slot_locked = Mock(side_effect=stop)
+        controller._prune_locked({1, 2, 3})
+
+        self.assertIn(9, controller._processes)
+        self.assertNotIn(1, controller._processes)
+
+
 if __name__ == "__main__":
     unittest.main()

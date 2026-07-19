@@ -23,6 +23,7 @@ final class StreamViewController: UIViewController {
     private let sourceLabel = UILabel()
     private let metricsLabel = UILabel()
     private let targetLabel = UILabel()
+    private let slotWatermarkLabel = UILabel()
     private let streamSlotPicker = StreamSlotPickerView(effect: nil)
     private let guiPanel = GUIControlPanelView(frame: .zero)
     private let legacyControls = LegacyStreamControlsView()
@@ -38,6 +39,9 @@ final class StreamViewController: UIViewController {
     private var whepClients: [Int: WHEPClient] = [:]
     private var activeWHEPSlot: Int?
     private var pendingWHEPSlot: Int?
+    private var displayedSlot: Int?
+    private var pendingRenderedSlot: Int?
+    private var pendingRenderedGeneration: Int?
     private var desiredWarmSlots = Set<Int>()
     private var prewarmSequence = 0
 
@@ -172,6 +176,25 @@ final class StreamViewController: UIViewController {
             touchOverlay.trailingAnchor.constraint(equalTo: videoView.trailingAnchor),
             touchOverlay.topAnchor.constraint(equalTo: videoView.topAnchor),
             touchOverlay.bottomAnchor.constraint(equalTo: videoView.bottomAnchor)
+        ])
+
+        slotWatermarkLabel.translatesAutoresizingMaskIntoConstraints = false
+        slotWatermarkLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
+        slotWatermarkLabel.textColor = UIColor(red: 0.35, green: 1, blue: 0.2, alpha: 0.92)
+        slotWatermarkLabel.textAlignment = .center
+        slotWatermarkLabel.isUserInteractionEnabled = false
+        slotWatermarkLabel.isHidden = true
+        slotWatermarkLabel.alpha = 0.6
+        slotWatermarkLabel.layer.shadowColor = UIColor(red: 0.2, green: 1, blue: 0.1, alpha: 1).cgColor
+        slotWatermarkLabel.layer.shadowOpacity = 0.8
+        slotWatermarkLabel.layer.shadowRadius = 3
+        slotWatermarkLabel.layer.shadowOffset = .zero
+        view.addSubview(slotWatermarkLabel)
+        NSLayoutConstraint.activate([
+            slotWatermarkLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            slotWatermarkLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            slotWatermarkLabel.widthAnchor.constraint(equalToConstant: 28),
+            slotWatermarkLabel.heightAnchor.constraint(equalToConstant: 22)
         ])
 
         streamSlotPicker.translatesAutoresizingMaskIntoConstraints = false
@@ -558,8 +581,15 @@ final class StreamViewController: UIViewController {
     }
 
     private func configureCallbacks() {
-        frameMonitor.onFirstFrame = { [weak self] size in
+        frameMonitor.onFirstFrame = { [weak self] size, generation in
             guard let self else { return }
+            guard generation == self.pendingRenderedGeneration,
+                  let renderedSlot = self.pendingRenderedSlot,
+                  self.activeWHEPSlot == renderedSlot else { return }
+            self.displayedSlot = renderedSlot
+            self.pendingRenderedSlot = nil
+            self.pendingRenderedGeneration = nil
+            self.updateSlotWatermark()
             self.renderedSize = size
             if let switchStartedAt = self.switchStartedAt {
                 self.lastSwitchMilliseconds = Int(Date().timeIntervalSince(switchStartedAt) * 1000)
@@ -972,7 +1002,8 @@ final class StreamViewController: UIViewController {
         if let activeWHEPSlot, activeWHEPSlot != slot {
             whepClients[activeWHEPSlot]?.setRenderer(nil)
         }
-        frameMonitor.reset()
+        pendingRenderedSlot = slot
+        pendingRenderedGeneration = frameMonitor.reset()
         renderedFPS = 0
         renderedSize = .zero
         client.setRenderer(frameMonitor)
@@ -1030,6 +1061,10 @@ final class StreamViewController: UIViewController {
         whepClients.removeAll()
         activeWHEPSlot = nil
         pendingWHEPSlot = nil
+        displayedSlot = nil
+        pendingRenderedSlot = nil
+        pendingRenderedGeneration = nil
+        updateSlotWatermark()
         desiredWarmSlots.removeAll()
         prewarmSequence += 1
     }
@@ -1055,6 +1090,16 @@ final class StreamViewController: UIViewController {
         statusLabel.textColor = good
             ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
             : UIColor(red: 1, green: 0.76, blue: 0.31, alpha: 1)
+    }
+
+    private func updateSlotWatermark() {
+        guard let displayedSlot else {
+            slotWatermarkLabel.text = nil
+            slotWatermarkLabel.isHidden = true
+            return
+        }
+        slotWatermarkLabel.text = "\(displayedSlot)"
+        slotWatermarkLabel.isHidden = false
     }
 
     @objc private func sampleRenderedFrames() {

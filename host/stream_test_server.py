@@ -27,6 +27,16 @@ SLOT_PID_MAP_PATH = Path(
     os.environ.get("GUI_TEST_PC_SLOT_PID_MAP", r"D:\15game\gui_test_pc_slot_pids.json")
 )
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+HARD_WINDOW_X = 0
+HARD_WINDOW_Y = 0
+HARD_OUTER_WIDTH = 1942
+HARD_OUTER_HEIGHT = 1136
+HARD_CLIENT_WIDTH = 1920
+HARD_CLIENT_HEIGHT = 1080
+RENDER_REFRESH_INSET_PX = 8
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
 
 def _window_text(user32: ctypes.WinDLL, hwnd: int) -> str:
@@ -205,6 +215,124 @@ def source_identity(slot: int) -> dict[str, object]:
     return result
 
 
+def _physical_window_geometry(user32: ctypes.WinDLL, hwnd: int) -> dict[str, int]:
+    window_rect = wintypes.RECT()
+    client_rect = wintypes.RECT()
+    client_origin = wintypes.POINT(0, 0)
+    if not user32.GetWindowRect(hwnd, ctypes.byref(window_rect)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not user32.GetClientRect(hwnd, ctypes.byref(client_rect)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not user32.ClientToScreen(hwnd, ctypes.byref(client_origin)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return {
+        "window_x": int(window_rect.left),
+        "window_y": int(window_rect.top),
+        "outer_width": int(window_rect.right - window_rect.left),
+        "outer_height": int(window_rect.bottom - window_rect.top),
+        "client_x": int(client_origin.x),
+        "client_y": int(client_origin.y),
+        "client_width": int(client_rect.right - client_rect.left),
+        "client_height": int(client_rect.bottom - client_rect.top),
+    }
+
+
+def repair_stream_layout(slots: list[int]) -> dict[str, object]:
+    identities = {slot: source_identity(slot) for slot in slots}
+    unavailable = [
+        {"slot": slot, "error": identity.get("error")}
+        for slot, identity in identities.items()
+        if not identity.get("ok")
+    ]
+    if unavailable:
+        raise RuntimeError(f"stream layout sources are not ready: {unavailable}")
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ClientToScreen.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = wintypes.BOOL
+
+    old_context = user32.SetThreadDpiAwarenessContext(
+        ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    )
+    before: list[dict[str, int]] = []
+    after: list[dict[str, int]] = []
+    flags = SWP_NOZORDER | SWP_NOACTIVATE
+    try:
+        for slot in slots:
+            hwnd = int(identities[slot]["hwnd"])
+            before.append({"slot": slot, **_physical_window_geometry(user32, hwnd)})
+            if not user32.SetWindowPos(
+                hwnd,
+                0,
+                HARD_WINDOW_X,
+                HARD_WINDOW_Y,
+                HARD_OUTER_WIDTH - RENDER_REFRESH_INSET_PX,
+                HARD_OUTER_HEIGHT - RENDER_REFRESH_INSET_PX,
+                flags,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        time.sleep(0.5)
+        for slot in slots:
+            hwnd = int(identities[slot]["hwnd"])
+            if not user32.SetWindowPos(
+                hwnd,
+                0,
+                HARD_WINDOW_X,
+                HARD_WINDOW_Y,
+                HARD_OUTER_WIDTH,
+                HARD_OUTER_HEIGHT,
+                flags,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        time.sleep(1.2)
+        for slot in slots:
+            hwnd = int(identities[slot]["hwnd"])
+            geometry = {"slot": slot, **_physical_window_geometry(user32, hwnd)}
+            after.append(geometry)
+    finally:
+        if old_context:
+            user32.SetThreadDpiAwarenessContext(old_context)
+
+    invalid = [
+        geometry
+        for geometry in after
+        if geometry["window_x"] != HARD_WINDOW_X
+        or geometry["window_y"] != HARD_WINDOW_Y
+        or geometry["outer_width"] != HARD_OUTER_WIDTH
+        or geometry["outer_height"] != HARD_OUTER_HEIGHT
+        or geometry["client_width"] != HARD_CLIENT_WIDTH
+        or geometry["client_height"] != HARD_CLIENT_HEIGHT
+    ]
+    if invalid:
+        raise RuntimeError(f"stream layout hard-rule validation failed: {invalid}")
+    return {
+        "ok": True,
+        "policy": "starcg_4k_stacked_1080p_pico_v1",
+        "refresh_inset_px": RENDER_REFRESH_INSET_PX,
+        "slots_refreshed": len(after),
+        "before": before,
+        "after": after,
+    }
+
+
 def load_runtime_state() -> dict[str, object]:
     state_path = RUNTIME / "state.json"
     if not state_path.exists():
@@ -342,6 +470,9 @@ class StreamPublisherController:
         self.viewer_idle_timeout_seconds = max(5.0, float(viewer_idle_timeout_seconds))
         self._lock = threading.RLock()
         self._viewer_lock = threading.Lock()
+        self._activation_priority_lock = threading.Lock()
+        self._activation_waiters = 0
+        self._activation_pending = threading.Event()
         self._processes: dict[int, subprocess.Popen[bytes]] = {}
         self._stdout_handles: dict[int, object] = {}
         self._stderr_handles: dict[int, object] = {}
@@ -669,6 +800,9 @@ class StreamPublisherController:
         )
 
     def _prune_locked(self, keep: set[int]) -> None:
+        keep = set(keep)
+        if self._active_slot is not None:
+            keep.add(self._active_slot)
         while len(self._processes) > self.cache_size:
             candidates = [slot for slot in self._processes if slot not in keep]
             if not candidates:
@@ -678,23 +812,37 @@ class StreamPublisherController:
             victim = min(candidates, key=lambda slot: self._last_used.get(slot, 0.0))
             self._stop_slot_locked(victim)
 
+    def _begin_activation_priority(self) -> None:
+        with self._activation_priority_lock:
+            self._activation_waiters += 1
+            self._activation_pending.set()
+
+    def _end_activation_priority(self) -> None:
+        with self._activation_priority_lock:
+            self._activation_waiters = max(0, self._activation_waiters - 1)
+            if self._activation_waiters == 0:
+                self._activation_pending.clear()
+
     def activate(self, slot: int) -> dict[str, object]:
         with self._viewer_lock:
             if self._viewer_state != "background":
                 self._viewer_state = "active"
                 self._viewer_slot = slot
                 self._last_viewer_heartbeat = time.monotonic()
-        identity = self._validate_slot(slot)
-
-        with self._lock:
-            reused, elapsed_ms = self._start_slot_locked(slot, identity)
-            self._active_slot = slot
-            self._last_used[slot] = time.monotonic()
-            self._activated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._last_activation_ms = elapsed_ms
-            self._prune_locked({slot})
-            self._write_state()
-            return {**self.status(), "reused": reused, "activation_ms": elapsed_ms}
+        self._begin_activation_priority()
+        try:
+            identity = self._validate_slot(slot)
+            with self._lock:
+                reused, elapsed_ms = self._start_slot_locked(slot, identity)
+                self._active_slot = slot
+                self._last_used[slot] = time.monotonic()
+                self._activated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                self._last_activation_ms = elapsed_ms
+                self._prune_locked({slot})
+                self._write_state()
+                return {**self.status(), "reused": reused, "activation_ms": elapsed_ms}
+        finally:
+            self._end_activation_priority()
 
     def prewarm(self, slots: list[int]) -> dict[str, object]:
         ordered_slots = list(dict.fromkeys(slots))
@@ -707,16 +855,27 @@ class StreamPublisherController:
         identities = {slot: self._validate_slot(slot) for slot in ordered_slots}
         timings: dict[str, int] = {}
         reused_slots: list[int] = []
+        keep = set(ordered_slots)
         with self._lock:
-            keep = set(ordered_slots)
             for existing in list(self._processes):
                 if existing not in keep and existing != self._active_slot:
                     self._stop_slot_locked(existing)
-            for slot in ordered_slots:
+
+        interrupted = False
+        for slot in ordered_slots:
+            if self._activation_pending.is_set():
+                interrupted = True
+                break
+            with self._lock:
+                if self._activation_pending.is_set():
+                    interrupted = True
+                    break
                 reused, elapsed_ms = self._start_slot_locked(slot, identities[slot])
                 timings[str(slot)] = elapsed_ms
                 if reused:
                     reused_slots.append(slot)
+
+        with self._lock:
             self._prune_locked(keep)
             self._write_state()
             return {
@@ -724,6 +883,7 @@ class StreamPublisherController:
                 "requested_slots": ordered_slots,
                 "reused_slots": reused_slots,
                 "activation_ms_by_slot": timings,
+                "interrupted_for_activation": interrupted,
             }
 
 
@@ -899,6 +1059,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=5110)
     parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
     parser.add_argument("--probe", type=int)
+    parser.add_argument("--repair-stream-layout", action="store_true")
     parser.add_argument("--pico-config")
     parser.add_argument("--input-token-file")
     parser.add_argument("--gui-input-url")
@@ -914,6 +1075,9 @@ def main() -> int:
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
     args = parser.parse_args()
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
+    if args.repair_stream_layout:
+        print(json.dumps(repair_stream_layout(slots), separators=(",", ":")))
+        return 0
     if args.probe is not None:
         print(json.dumps(source_identity(args.probe), separators=(",", ":")))
         return 0
