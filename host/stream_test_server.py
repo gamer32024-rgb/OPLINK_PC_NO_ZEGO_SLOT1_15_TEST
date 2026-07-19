@@ -329,6 +329,7 @@ class StreamPublisherController:
         bitrate_kbps: int,
         mediamtx_api: str,
         cache_size: int = 3,
+        viewer_idle_timeout_seconds: float = 15.0,
     ) -> None:
         self.ffmpeg = str(Path(ffmpeg).resolve())
         self.encoder = encoder
@@ -338,7 +339,9 @@ class StreamPublisherController:
         self.bitrate_kbps = int(bitrate_kbps)
         self.mediamtx_api = mediamtx_api.rstrip("/")
         self.cache_size = max(1, int(cache_size))
-        self._lock = threading.Lock()
+        self.viewer_idle_timeout_seconds = max(5.0, float(viewer_idle_timeout_seconds))
+        self._lock = threading.RLock()
+        self._viewer_lock = threading.Lock()
         self._processes: dict[int, subprocess.Popen[bytes]] = {}
         self._stdout_handles: dict[int, object] = {}
         self._stderr_handles: dict[int, object] = {}
@@ -347,6 +350,16 @@ class StreamPublisherController:
         self._activated_at: str | None = None
         self._last_activation_ms: int | None = None
         self._state_path = RUNTIME / "active_publisher.json"
+        self._viewer_state = "never_connected"
+        self._viewer_slot: int | None = None
+        self._last_viewer_heartbeat: float | None = None
+        self._shutdown = threading.Event()
+        self._idle_thread = threading.Thread(
+            target=self._idle_monitor,
+            name="oplink-viewer-idle-monitor",
+            daemon=True,
+        )
+        self._idle_thread.start()
 
     def _path_name(self, slot: int) -> str:
         return f"slot{slot:02d}"
@@ -358,6 +371,84 @@ class StreamPublisherController:
                 return response.status == HTTPStatus.OK
         except (HTTPError, URLError, TimeoutError, OSError):
             return False
+
+    def _whep_session_count(self) -> int | None:
+        url = f"{self.mediamtx_api}/v3/webrtcsessions/list"
+        try:
+            with urlopen(url, timeout=0.5) as response:
+                payload = json.load(response)
+            items = payload.get("items") if isinstance(payload, dict) else None
+            return len(items) if isinstance(items, list) else None
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
+            return None
+
+    def viewer_status(self) -> dict[str, object]:
+        with self._viewer_lock:
+            last_heartbeat = self._last_viewer_heartbeat
+            age_ms = (
+                round((time.monotonic() - last_heartbeat) * 1000)
+                if last_heartbeat is not None
+                else None
+            )
+            return {
+                "state": self._viewer_state,
+                "slot": self._viewer_slot,
+                "heartbeat_age_ms": age_ms,
+                "idle_timeout_ms": round(self.viewer_idle_timeout_seconds * 1000),
+            }
+
+    def viewer_update(self, state: str, slot: int | None) -> dict[str, object]:
+        if state not in {"active", "background", "leave"}:
+            raise StreamPublisherError("viewer state must be active, background, or leave")
+        if state != "leave" and slot is None:
+            raise StreamPublisherError("viewer slot is required")
+        now = time.monotonic()
+        with self._viewer_lock:
+            self._viewer_state = state
+            self._viewer_slot = slot
+            self._last_viewer_heartbeat = now
+        if state == "background" and slot is not None:
+            self.retain_only(slot)
+        return {"ok": True, **self.viewer_status(), "warm_slots": self.status()["warm_slots"]}
+
+    def _idle_monitor(self) -> None:
+        while not self._shutdown.wait(1.0):
+            with self._viewer_lock:
+                last_heartbeat = self._last_viewer_heartbeat
+            if last_heartbeat is None:
+                continue
+            if time.monotonic() - last_heartbeat < self.viewer_idle_timeout_seconds:
+                continue
+            session_count = self._whep_session_count()
+            if session_count is None or session_count > 0:
+                continue
+            with self._viewer_lock:
+                current_heartbeat = self._last_viewer_heartbeat
+                if (
+                    current_heartbeat is None
+                    or time.monotonic() - current_heartbeat < self.viewer_idle_timeout_seconds
+                ):
+                    continue
+                self._viewer_state = "idle"
+            with self._lock:
+                if not self._processes:
+                    continue
+                self._stop_locked()
+                self._write_state()
+
+    def retain_only(self, slot: int) -> None:
+        with self._lock:
+            for existing in list(self._processes):
+                if existing != slot:
+                    self._stop_slot_locked(existing)
+            process = self._processes.get(slot)
+            if process is not None and process.poll() is None:
+                self._active_slot = slot
+                self._last_used[slot] = time.monotonic()
+            else:
+                self._active_slot = None
+                self._activated_at = None
+            self._write_state()
 
     def _publisher_args(self, identity: dict[str, object]) -> list[str]:
         hwnd = int(identity["hwnd"])
@@ -487,31 +578,39 @@ class StreamPublisherController:
         self._state_path.unlink(missing_ok=True)
 
     def stop(self) -> None:
+        self._shutdown.set()
+        if (
+            self._idle_thread.is_alive()
+            and threading.current_thread() is not self._idle_thread
+        ):
+            self._idle_thread.join(timeout=2.0)
         with self._lock:
             self._stop_locked()
 
     def status(self) -> dict[str, object]:
-        warm_slots = sorted(
-            slot for slot, process in self._processes.items() if process.poll() is None
-        )
-        active_process = self._processes.get(self._active_slot or 0)
-        alive = active_process is not None and active_process.poll() is None
-        return {
-            "ok": True,
-            "mode": "warm_publisher_cache",
-            "encoder": self.encoder,
-            "cache_size": self.cache_size,
-            "warm_slots": warm_slots,
-            "active_slot": self._active_slot if alive else None,
-            "publisher_pid": active_process.pid if alive and active_process else None,
-            "publisher_alive": alive,
-            "publishers": [
-                {"slot": slot, "pid": self._processes[slot].pid}
-                for slot in warm_slots
-            ],
-            "activated_at": self._activated_at if alive else None,
-            "last_activation_ms": self._last_activation_ms,
-        }
+        with self._lock:
+            warm_slots = sorted(
+                slot for slot, process in self._processes.items() if process.poll() is None
+            )
+            active_process = self._processes.get(self._active_slot or 0)
+            alive = active_process is not None and active_process.poll() is None
+            return {
+                "ok": True,
+                "mode": "warm_publisher_cache",
+                "encoder": self.encoder,
+                "cache_size": self.cache_size,
+                "warm_slots": warm_slots,
+                "active_slot": self._active_slot if alive else None,
+                "publisher_pid": active_process.pid if alive and active_process else None,
+                "publisher_alive": alive,
+                "publishers": [
+                    {"slot": slot, "pid": self._processes[slot].pid}
+                    for slot in warm_slots
+                ],
+                "activated_at": self._activated_at if alive else None,
+                "last_activation_ms": self._last_activation_ms,
+                "viewer": self.viewer_status(),
+            }
 
     def _validate_slot(self, slot: int) -> dict[str, object]:
         identity = source_identity(slot)
@@ -580,6 +679,11 @@ class StreamPublisherController:
             self._stop_slot_locked(victim)
 
     def activate(self, slot: int) -> dict[str, object]:
+        with self._viewer_lock:
+            if self._viewer_state != "background":
+                self._viewer_state = "active"
+                self._viewer_slot = slot
+                self._last_viewer_heartbeat = time.monotonic()
         identity = self._validate_slot(slot)
 
         with self._lock:
@@ -670,6 +774,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(self.publisher_controller.status())
             return
+        if path == "/api/v1/viewer":
+            if not self.publisher_controller:
+                self._json(
+                    {"ok": False, "error": "stream publisher controller is disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            else:
+                self._json({"ok": True, **self.publisher_controller.viewer_status()})
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _input_status(self) -> dict[str, object]:
@@ -736,6 +849,24 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
                 self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
+        if path == "/api/v1/viewer":
+            if not self.publisher_controller:
+                self._json(
+                    {"ok": False, "error": "stream publisher controller is disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                payload = self._read_json_body()
+                state = str(payload.get("state") or "").strip().lower()
+                raw_slot = payload.get("slot")
+                slot = int(raw_slot) if raw_slot is not None else None
+                if slot is not None and slot not in self.slots:
+                    raise ValueError(f"slot must be one of {self.slots}")
+                self._json(self.publisher_controller.viewer_update(state, slot))
+            except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
+                self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
         if path != "/api/v1/input":
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -779,6 +910,7 @@ def main() -> int:
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--bitrate-kbps", type=int, default=6000)
     parser.add_argument("--publisher-cache-size", type=int, default=3)
+    parser.add_argument("--viewer-idle-timeout-seconds", type=float, default=15.0)
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
     args = parser.parse_args()
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
@@ -807,6 +939,7 @@ def main() -> int:
             bitrate_kbps=args.bitrate_kbps,
             mediamtx_api=args.mediamtx_api,
             cache_size=args.publisher_cache_size,
+            viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
         )
         Handler.publisher_controller = publisher_controller
         atexit.register(publisher_controller.stop)

@@ -9,6 +9,8 @@ param(
     [int]$BitrateKbps = 6000,
     [ValidateRange(1, 5)]
     [int]$PublisherCacheSize = 3,
+    [ValidateRange(5, 120)]
+    [int]$ViewerIdleTimeoutSeconds = 15,
     [ValidateSet("auto", "nvenc", "mf", "x264")]
     [string]$Encoder = "auto",
     [string]$FFmpegPath,
@@ -321,7 +323,8 @@ try {
         "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
         "--width", "$profileWidth", "--height", "$profileHeight",
         "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps",
-        "--publisher-cache-size", "$PublisherCacheSize"
+        "--publisher-cache-size", "$PublisherCacheSize",
+        "--viewer-idle-timeout-seconds", "$ViewerIdleTimeoutSeconds"
     )
     if ($inputMode -eq "direct") {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
@@ -335,6 +338,7 @@ try {
         started_at = (Get-Date).ToUniversalTime().ToString("o")
         publisher_mode = "warm_publisher_cache"
         publisher_cache_size = $PublisherCacheSize
+        viewer_idle_timeout_seconds = $ViewerIdleTimeoutSeconds
         profile = [ordered]@{
             encoded = [ordered]@{ w = $profileWidth; h = $profileHeight }
             fps = $Fps

@@ -12,7 +12,7 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 | Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[15]` title fallback |
 | Capture | FFmpeg `gfxcapture` Windows Graphics Capture by HWND; occluded windows remain observable |
 | Current source geometry | `1280x720` logical at 150% DPI, producing `1920x1080` WGC frames |
-| Publisher | Three-entry hardware H.264 warm cache: current, previous, and next available slot |
+| Publisher | Viewer-aware H.264 cache: three while active, current only in background grace, zero after 15 idle seconds |
 | Output | H.264 Constrained Baseline, `1920x1080`, 30 fps, 6 Mbps, no B-frames |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
 | Network | Tailscale Serve for HTTPS/WHEP; media ICE advertises only the host Tailscale IPv4 |
@@ -20,7 +20,9 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 | Input target | iPhone-to-HID round trip below 300 ms through authenticated live-touch relay |
 | Control owner | `GUI_TEST_PC`; iOS calls only the stream input relay and `/gui-test-pc/api/...` bridge endpoints |
 
-The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows retains up to three exact-HWND publishers and iOS retains their WHEP peers. The visible renderer is moved only after the selected peer has decoded a frame, so the old frame remains visible during a cold switch.
+The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows retains up to three exact-HWND publishers and iOS retains their WHEP peers. A warmed peer moves to the visible renderer immediately, while `/activate` is updated in the background. A cold peer moves only after it has decoded a frame, so the old frame remains visible during startup.
+
+The iOS app sends a viewer heartbeat every three seconds while foregrounded. Entering the background closes all iOS WHEP peers and asks Windows to retain only the current publisher. If no heartbeat and no WHEP session exist for 15 seconds, Windows stops every publisher. Reopening the app starts the current slot first and prewarms adjacent slots only after the first visible frame.
 
 Live game taps and drags remain Pico HID touchscreen reports through GUI_TEST_PC. The legacy-style iOS keyboard panel uses authenticated `text` and `key` messages, then GUI_TEST_PC activates the selected slot and sends Windows keyboard input. Keyboard support never changes touch input to mouse fallback.
 
@@ -34,6 +36,13 @@ Measured locally on 2026-07-19:
 - each FFmpeg process used about 84 MB working set during the three-publisher test.
 
 These are host-side measurements. The final switch acceptance gate remains the native iPhone first-rendered-frame measurement.
+
+Viewer-aware power validation on 2026-07-19, with the same game windows left running:
+
+- foreground three-publisher state: about `64.8 W` GPU power;
+- background one-publisher grace state: about `63.5 W` GPU power;
+- idle zero-publisher state: about `60-62 W` GPU power;
+- decoder utilization remained zero because Windows captures and encodes; the iPhone performs stream decoding.
 
 ## Windows host
 

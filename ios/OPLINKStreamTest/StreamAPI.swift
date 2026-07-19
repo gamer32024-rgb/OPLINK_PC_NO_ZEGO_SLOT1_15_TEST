@@ -92,6 +92,42 @@ final class StreamAPI {
         }.resume()
     }
 
+    func updateViewer(
+        baseURL: URL,
+        state: String,
+        slot: Int?,
+        completion: ((Result<StreamViewerResponse, Error>) -> Void)? = nil
+    ) {
+        var request = URLRequest(url: StreamEndpoint.viewer(base: baseURL))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(StreamViewerRequest(state: state, slot: slot))
+        request.timeoutInterval = 4
+        session.dataTask(with: request) { data, response, error in
+            if let error {
+                completion?(.failure(error))
+                return
+            }
+            guard let http = response as? HTTPURLResponse, let data else {
+                completion?(.failure(APIError.invalidResponse))
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+                completion?(.failure(StreamInputError.rejected(
+                    statusCode: http.statusCode,
+                    message: message ?? "Viewer update failed: HTTP \(http.statusCode)"
+                )))
+                return
+            }
+            do {
+                completion?(.success(try JSONDecoder().decode(StreamViewerResponse.self, from: data)))
+            } catch {
+                completion?(.failure(error))
+            }
+        }.resume()
+    }
+
     func sendInput(
         baseURL: URL,
         token: String,

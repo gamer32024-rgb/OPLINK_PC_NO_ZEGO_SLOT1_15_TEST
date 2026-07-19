@@ -58,6 +58,8 @@ final class StreamViewController: UIViewController {
     private var inputInFlight = false
     private var metricsTimer: Timer?
     private var bridgeTimer: Timer?
+    private var viewerHeartbeatTimer: Timer?
+    private var viewerIsForeground = false
 
     private var bridgeTargetRunningSlots = Set<Int>()
     private var bridgeHeartbeatRunningSlots = Set<Int>()
@@ -108,12 +110,25 @@ final class StreamViewController: UIViewController {
         )
         keyboardTextField.delegate = self
         keyboardTextField.addTarget(self, action: #selector(keyboardTextChanged), for: .editingChanged)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         requestLandscape()
         if configuredBaseURL() != nil {
+            beginViewerSession()
             connect(slot: selectedSlot)
             refreshGUIBridgeState()
         } else {
@@ -133,7 +148,9 @@ final class StreamViewController: UIViewController {
     deinit {
         metricsTimer?.invalidate()
         bridgeTimer?.invalidate()
+        viewerHeartbeatTimer?.invalidate()
         keyboardFlushTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
         whepClients.values.forEach { $0.stop() }
     }
 
@@ -552,6 +569,9 @@ final class StreamViewController: UIViewController {
                 && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
+            if self.viewerIsForeground, let baseURL = self.configuredBaseURL() {
+                self.prewarmAdjacentStreams(baseURL: baseURL, around: self.selectedSlot)
+            }
         }
         frameMonitor.onSizeChanged = { [weak self] size in
             self?.renderedSize = size
@@ -705,6 +725,63 @@ final class StreamViewController: UIViewController {
         }
     }
 
+    private func beginViewerSession() {
+        guard !viewerIsForeground else { return }
+        viewerIsForeground = true
+        sendViewerState("active", slot: selectedSlot)
+        viewerHeartbeatTimer?.invalidate()
+        let timer = Timer(
+            timeInterval: 3,
+            target: self,
+            selector: #selector(sendViewerHeartbeat),
+            userInfo: nil,
+            repeats: true
+        )
+        viewerHeartbeatTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func sendViewerHeartbeat() {
+        guard viewerIsForeground else { return }
+        sendViewerState("active", slot: selectedSlot)
+    }
+
+    @objc private func applicationDidEnterBackground() {
+        guard viewerIsForeground else { return }
+        viewerIsForeground = false
+        viewerHeartbeatTimer?.invalidate()
+        viewerHeartbeatTimer = nil
+        connectionSequence += 1
+        prewarmSequence += 1
+        sendViewerState("background", slot: selectedSlot, allowBackgroundExecution: true)
+        resetWHEPClients()
+        touchOverlay.isUserInteractionEnabled = false
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        guard isViewLoaded, view.window != nil, !viewerIsForeground else { return }
+        beginViewerSession()
+        connect(slot: selectedSlot)
+        refreshGUIBridgeState()
+    }
+
+    private func sendViewerState(
+        _ state: String,
+        slot: Int?,
+        allowBackgroundExecution: Bool = false
+    ) {
+        guard let baseURL = configuredBaseURL() else { return }
+        let backgroundTask = allowBackgroundExecution
+            ? UIApplication.shared.beginBackgroundTask(withName: "OPLINK viewer state", expirationHandler: nil)
+            : UIBackgroundTaskIdentifier.invalid
+        streamAPI.updateViewer(baseURL: baseURL, state: state, slot: slot) { _ in
+            guard backgroundTask != .invalid else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+            }
+        }
+    }
+
     private func adjacentAvailableSlot(step: Int) -> Int {
         adjacentAvailableSlot(from: selectedSlot, step: step)
     }
@@ -714,6 +791,9 @@ final class StreamViewController: UIViewController {
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
+        }
+        if viewerIsForeground {
+            sendViewerState("active", slot: slot)
         }
         selectedSlot = slot
         connectionSequence += 1
@@ -731,6 +811,21 @@ final class StreamViewController: UIViewController {
         refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
+
+        if desiredWarmSlots.contains(slot),
+           let client = whepClients[slot],
+           client.isReady,
+           let response = latestResponse,
+           let source = response.sources.first(where: { $0.slot == slot }),
+           source.ok,
+           source.aspectIs16x9 == true {
+            updateSourceLabel(source: source, response: response)
+            lastPublisherActivationMilliseconds = 0
+            lastWHEPConnectMilliseconds = 0
+            displayWHEP(slot: slot)
+            activateWarmPublisherInBackground(baseURL: baseURL, slot: slot, sequence: sequence)
+            return
+        }
 
         if let response = latestResponse,
            let source = response.sources.first(where: { $0.slot == slot }),
@@ -804,7 +899,29 @@ final class StreamViewController: UIViewController {
                     self.lastPublisherActivationMilliseconds = activation.activationMs
                     self.updateMetrics()
                     self.connectOrDisplayWHEP(baseURL: baseURL, slot: slot)
-                    self.prewarmAdjacentStreams(baseURL: baseURL, around: slot)
+                }
+            }
+        }
+    }
+
+    private func activateWarmPublisherInBackground(baseURL: URL, slot: Int, sequence: Int) {
+        streamAPI.activate(baseURL: baseURL, slot: slot) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self,
+                      sequence == self.connectionSequence,
+                      self.selectedSlot == slot else { return }
+                switch result {
+                case .failure(let error):
+                    self.setStatus("畫面已切換；主機狀態更新失敗：\(error.localizedDescription)", good: false)
+                case .success(let activation):
+                    guard activation.ok,
+                          activation.publisherAlive,
+                          activation.activeSlot == slot else {
+                        self.setStatus("畫面已切換；主機 active Slot 更新失敗", good: false)
+                        return
+                    }
+                    self.lastPublisherActivationMilliseconds = activation.activationMs
+                    self.updateMetrics()
                 }
             }
         }
@@ -1311,6 +1428,7 @@ final class StreamViewController: UIViewController {
                     UserDefaults.standard.set(token, forKey: Defaults.inputToken)
                 }
                 self.resetWHEPClients()
+                self.beginViewerSession()
                 self.connect(slot: self.selectedSlot)
                 self.refreshGUIBridgeState()
             } catch {
