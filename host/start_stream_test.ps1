@@ -334,6 +334,22 @@ try {
     $api = Start-HiddenProcess -FilePath $Python -Arguments $apiArguments `
         -StdoutPath (Join-Path $Runtime "api.out.log") -StderrPath (Join-Path $Runtime "api.err.log")
 
+    $stateIdentities = @($identities | ForEach-Object {
+        [ordered]@{
+            slot = [int]$_.slot
+            hwnd = [int64]$_.hwnd
+            pid = [int]$_.pid
+            identity_source = [string]$_.identity_source
+            process_path = [string]$_.process_path
+            slot_pid_map_path = [string]$_.slot_pid_map_path
+            client_logical = [ordered]@{ w = [int]$_.client_logical.w; h = [int]$_.client_logical.h }
+            capture_physical_expected = [ordered]@{
+                w = [int]$_.capture_physical_expected.w
+                h = [int]$_.capture_physical_expected.h
+            }
+            aspect = [double]$_.aspect
+        }
+    })
     $state = [ordered]@{
         started_at = (Get-Date).ToUniversalTime().ToString("o")
         publisher_mode = "warm_publisher_cache"
@@ -374,7 +390,9 @@ try {
                 relayed_to = "GUI_TEST_PC"
             }
         }
-        source_identities = $identities
+        # Window titles can contain malformed surrogate text from the legacy game.
+        # Keep the runtime state machine-readable by persisting only stable identity fields.
+        source_identities = $stateIdentities
         tailscale = [ordered]@{
             ipv4 = $tailscaleIPv4
             host = $tailscaleDnsName

@@ -77,6 +77,23 @@ Stop only the processes recorded by this project:
 
 The start command prints the Tailnet HTTPS host and a random local pairing token when input is enabled. Runtime diagnostics and the token stay under ignored `host/runtime/` files.
 
+### Windows logon autostart
+
+Windows Graphics Capture and GUI_TEST_PC require an interactive desktop, so persistence starts after Windows user logon rather than before the sign-in screen. Install the watchdog once:
+
+```powershell
+cd host
+.\install_stream_autostart.ps1 -StartNow
+```
+
+The watchdog launches GUI_TEST_PC when its loopback live-touch bridge is absent, waits without error while fewer than 15 registered game processes are available, and then starts the 1080p/30 fps stream host with Tailscale Serve. It checks both the `5110` API and MediaMTX API continuously and restarts the verified project processes after an unexpected exit. It does not launch the 15 games automatically; use the existing GUI_TEST_PC launcher so a reboot does not unconditionally consume game resources.
+
+The Startup shortcut is `OPLINK_PC Stream Host.lnk`. Diagnostics are written to `host/runtime/autostart.log`. Remove persistence with:
+
+```powershell
+.\uninstall_stream_autostart.ps1 -StopStreamHost
+```
+
 ## GUI_TEST_PC bridge contract
 
 The native app reads:

@@ -5,29 +5,39 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSCommandPath
 $StatePath = Join-Path $Root "runtime\state.json"
 $ActivePublisherPath = Join-Path $Root "runtime\active_publisher.json"
+$ServerScript = [System.IO.Path]::GetFullPath((Join-Path $Root "stream_test_server.py"))
+$RuntimeConfig = [System.IO.Path]::GetFullPath((Join-Path $Root "runtime\mediamtx.runtime.yml"))
 
-if (!(Test-Path -LiteralPath $StatePath) -and !(Test-Path -LiteralPath $ActivePublisherPath)) {
-    if ($IgnoreMissing) { return }
-    throw "No active stream state was found."
+function Test-CommandLineContains {
+    param([string]$CommandLine, [string]$Needle)
+    if (!$CommandLine) { return $false }
+    return $CommandLine.IndexOf($Needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
 
-$ids = @()
-if (Test-Path -LiteralPath $StatePath) {
-    $state = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $ids += @($state.pids.mediamtx, $state.pids.api) + @($state.pids.publishers | ForEach-Object { $_.pid })
+# Runtime PID files survive a reboot and Windows can reuse those PIDs. Identify only
+# processes whose command lines prove that they belong to this stream host.
+$ownedProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $name = [string]$_.Name
+    $commandLine = [string]$_.CommandLine
+    $isApi = $name -match '^pythonw?\.exe$' -and (Test-CommandLineContains $commandLine $ServerScript)
+    $isMediaMtx = $name -ieq 'mediamtx.exe' -and (Test-CommandLineContains $commandLine $RuntimeConfig)
+    $isPublisher = $name -ieq 'ffmpeg.exe' -and
+        (Test-CommandLineContains $commandLine 'gfxcapture=hwnd=') -and
+        (Test-CommandLineContains $commandLine 'rtsp://127.0.0.1:8554/slot')
+    $isApi -or $isMediaMtx -or $isPublisher
+})
+
+foreach ($process in $ownedProcesses | Sort-Object @{ Expression = {
+    if ($_.Name -ieq 'ffmpeg.exe') { 0 } elseif ($_.Name -match '^python') { 1 } else { 2 }
+} }) {
+    Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
 }
-if (Test-Path -LiteralPath $ActivePublisherPath) {
-    try {
-        $activePublisher = Get-Content -LiteralPath $ActivePublisherPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($activePublisher.publisher_pid) { $ids += [int]$activePublisher.publisher_pid }
-        $ids += @($activePublisher.publishers | ForEach-Object { $_.pid })
-    } catch {
-    }
-}
-foreach ($id in $ids | Where-Object { $_ } | Sort-Object -Unique) {
-    $process = Get-Process -Id $id -ErrorAction SilentlyContinue
-    if ($process) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
-}
+
+$hadRuntimeState = (Test-Path -LiteralPath $StatePath) -or (Test-Path -LiteralPath $ActivePublisherPath)
 Remove-Item -LiteralPath $StatePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $ActivePublisherPath -Force -ErrorAction SilentlyContinue
-Write-Host "Stopped the OPLINK_PC slots 1-15 test processes."
+
+if ($ownedProcesses.Count -eq 0 -and !$hadRuntimeState -and !$IgnoreMissing) {
+    throw "No active OPLINK_PC stream processes or runtime state were found."
+}
+Write-Host "Stopped $($ownedProcesses.Count) verified OPLINK_PC stream process(es)."
