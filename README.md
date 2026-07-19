@@ -86,7 +86,7 @@ cd host
 .\install_stream_autostart.ps1 -StartNow
 ```
 
-The watchdog launches GUI_TEST_PC when its loopback live-touch bridge is absent, waits without error while fewer than 15 registered game processes are available, and then starts the 1080p/30 fps stream host with Tailscale Serve. It checks both the `5110` API and MediaMTX API continuously and restarts the verified project processes after an unexpected exit. It does not launch the 15 games automatically; use the existing GUI_TEST_PC launcher so a reboot does not unconditionally consume game resources.
+The watchdog never launches GUI_TEST_PC or game windows. It waits for you to open GUI_TEST_PC and start all 15 slots manually, then starts the 1080p/30 fps stream host with Tailscale Serve. It checks both the `5110` API and MediaMTX API continuously and restarts only the verified stream-host processes after an unexpected exit. The existing GUI_TEST_PC launcher remains the sole owner of the per-launch NetBind and multi-instance bypass sequence.
 
 The Startup shortcut is `OPLINK_PC Stream Host.lnk`. Diagnostics are written to `host/runtime/autostart.log`. Remove persistence with:
 
