@@ -113,6 +113,10 @@ struct StreamActivateRequest: Encodable {
     let slot: Int
 }
 
+struct StreamPrewarmRequest: Encodable {
+    let slots: [Int]
+}
+
 struct StreamActivateResponse: Decodable {
     let ok: Bool
     let mode: String
@@ -129,6 +133,18 @@ struct StreamActivateResponse: Decodable {
         case publisherPID = "publisher_pid"
         case publisherAlive = "publisher_alive"
         case activationMs = "activation_ms"
+    }
+}
+
+struct StreamPrewarmResponse: Decodable {
+    let ok: Bool
+    let warmSlots: [Int]
+    let requestedSlots: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case warmSlots = "warm_slots"
+        case requestedSlots = "requested_slots"
     }
 }
 
@@ -219,6 +235,10 @@ enum StreamEndpoint {
 
     static func activate(base: URL) -> URL {
         replacingPath(base, with: "/oplink-test/api/v1/activate")
+    }
+
+    static func prewarm(base: URL) -> URL {
+        replacingPath(base, with: "/oplink-test/api/v1/prewarm")
     }
 
     static func whep(base: URL, slot: Int) -> URL {

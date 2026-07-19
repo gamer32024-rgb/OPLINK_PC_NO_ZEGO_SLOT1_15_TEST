@@ -1,9 +1,35 @@
 import Foundation
+import CoreGraphics
 import WebRTC
+
+private final class FirstFrameProbe: NSObject, RTCVideoRenderer {
+    var onFirstFrame: (() -> Void)?
+
+    private let lock = NSLock()
+    private var receivedFrame = false
+
+    func setSize(_ size: CGSize) {}
+
+    func renderFrame(_ frame: RTCVideoFrame?) {
+        guard frame != nil else { return }
+        lock.lock()
+        let isFirst = !receivedFrame
+        receivedFrame = true
+        lock.unlock()
+        if isFirst { onFirstFrame?() }
+    }
+
+    func reset() {
+        lock.lock()
+        receivedFrame = false
+        lock.unlock()
+    }
+}
 
 final class WHEPClient: NSObject {
     var onStateChanged: ((String) -> Void)?
     var onError: ((Error) -> Void)?
+    var onReady: ((Int) -> Void)?
 
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -21,17 +47,38 @@ final class WHEPClient: NSObject {
     private var iceReady: (() -> Void)?
     private var hasLocalCandidate = false
     private var connectionGeneration = 0
+    private let readyLock = NSLock()
+    private var ready = false
+    private var connectionStartedAt: Date?
+    private var frameProbe = FirstFrameProbe()
+
+    var isReady: Bool {
+        readyLock.lock()
+        defer { readyLock.unlock() }
+        return ready
+    }
+
+    var isStarted: Bool { peerConnection != nil }
 
     init(session: URLSession = .shared) {
         self.session = session
         super.init()
     }
 
-    func connect(endpoint: URL, renderer: RTCVideoRenderer) {
+    func connect(endpoint: URL, renderer: RTCVideoRenderer? = nil) {
         stop()
         connectionGeneration += 1
         let generation = connectionGeneration
+        frameProbe = FirstFrameProbe()
+        frameProbe.onFirstFrame = { [weak self] in
+            self?.markReady(generation: generation)
+        }
         hasLocalCandidate = false
+        readyLock.lock()
+        ready = false
+        readyLock.unlock()
+        connectionStartedAt = Date()
+        frameProbe.reset()
         self.renderer = renderer
         emitState("建立 WebRTC offer")
 
@@ -70,7 +117,10 @@ final class WHEPClient: NSObject {
         connectionGeneration += 1
         iceReady = nil
         hasLocalCandidate = false
-        if let remoteTrack, let renderer { remoteTrack.remove(renderer) }
+        if let remoteTrack {
+            if let renderer { remoteTrack.remove(renderer) }
+            remoteTrack.remove(frameProbe)
+        }
         remoteTrack = nil
         renderer = nil
         peerConnection?.close()
@@ -82,7 +132,22 @@ final class WHEPClient: NSObject {
             session.dataTask(with: request).resume()
         }
         sessionURL = nil
+        readyLock.lock()
+        ready = false
+        readyLock.unlock()
+        connectionStartedAt = nil
+        frameProbe.reset()
         emitState("未連線")
+    }
+
+    func setRenderer(_ renderer: RTCVideoRenderer?) {
+        if let remoteTrack, let current = self.renderer {
+            remoteTrack.remove(current)
+        }
+        self.renderer = renderer
+        if let remoteTrack, let renderer {
+            remoteTrack.add(renderer)
+        }
     }
 
     private func waitForICE(peer: RTCPeerConnection, generation: Int, completion: @escaping () -> Void) {
@@ -156,11 +221,30 @@ final class WHEPClient: NSObject {
     }
 
     private func attach(_ track: RTCVideoTrack) {
-        guard remoteTrack !== track, let renderer else { return }
-        if let remoteTrack { remoteTrack.remove(renderer) }
+        guard remoteTrack !== track else { return }
+        if let remoteTrack {
+            if let renderer { remoteTrack.remove(renderer) }
+            remoteTrack.remove(frameProbe)
+        }
         remoteTrack = track
-        track.add(renderer)
+        track.add(frameProbe)
+        if let renderer { track.add(renderer) }
         emitState("解碼中")
+    }
+
+    private func markReady(generation: Int) {
+        guard generation == connectionGeneration else { return }
+        readyLock.lock()
+        guard !ready else {
+            readyLock.unlock()
+            return
+        }
+        ready = true
+        readyLock.unlock()
+        let elapsed = connectionStartedAt.map {
+            Int(Date().timeIntervalSince($0) * 1000)
+        } ?? 0
+        DispatchQueue.main.async { [weak self] in self?.onReady?(elapsed) }
     }
 
     private func emitState(_ state: String) {

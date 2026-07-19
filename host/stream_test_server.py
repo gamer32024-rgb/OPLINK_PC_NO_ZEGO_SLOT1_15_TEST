@@ -328,6 +328,7 @@ class StreamPublisherController:
         fps: int,
         bitrate_kbps: int,
         mediamtx_api: str,
+        cache_size: int = 3,
     ) -> None:
         self.ffmpeg = str(Path(ffmpeg).resolve())
         self.encoder = encoder
@@ -336,10 +337,12 @@ class StreamPublisherController:
         self.fps = int(fps)
         self.bitrate_kbps = int(bitrate_kbps)
         self.mediamtx_api = mediamtx_api.rstrip("/")
+        self.cache_size = max(1, int(cache_size))
         self._lock = threading.Lock()
-        self._process: subprocess.Popen[bytes] | None = None
-        self._stdout_handle = None
-        self._stderr_handle = None
+        self._processes: dict[int, subprocess.Popen[bytes]] = {}
+        self._stdout_handles: dict[int, object] = {}
+        self._stderr_handles: dict[int, object] = {}
+        self._last_used: dict[int, float] = {}
         self._active_slot: int | None = None
         self._activated_at: str | None = None
         self._last_activation_ms: int | None = None
@@ -458,9 +461,8 @@ class StreamPublisherController:
         except OSError:
             return ""
 
-    def _stop_locked(self) -> None:
-        process = self._process
-        self._process = None
+    def _stop_slot_locked(self, slot: int) -> None:
+        process = self._processes.pop(slot, None)
         if process and process.poll() is None:
             process.terminate()
             try:
@@ -468,88 +470,157 @@ class StreamPublisherController:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=1.0)
-        for handle_name in ("_stdout_handle", "_stderr_handle"):
-            handle = getattr(self, handle_name)
+        for handles in (self._stdout_handles, self._stderr_handles):
+            handle = handles.pop(slot, None)
             if handle:
                 handle.close()
-                setattr(self, handle_name, None)
+        self._last_used.pop(slot, None)
+        if self._active_slot == slot:
+            self._active_slot = None
+            self._activated_at = None
+
+    def _stop_locked(self) -> None:
+        for slot in list(self._processes):
+            self._stop_slot_locked(slot)
         self._active_slot = None
         self._activated_at = None
-        if self._state_path.exists():
-            self._state_path.unlink(missing_ok=True)
+        self._state_path.unlink(missing_ok=True)
 
     def stop(self) -> None:
         with self._lock:
             self._stop_locked()
 
     def status(self) -> dict[str, object]:
-        process = self._process
-        alive = process is not None and process.poll() is None
+        warm_slots = sorted(
+            slot for slot, process in self._processes.items() if process.poll() is None
+        )
+        active_process = self._processes.get(self._active_slot or 0)
+        alive = active_process is not None and active_process.poll() is None
         return {
             "ok": True,
-            "mode": "single_active_publisher",
+            "mode": "warm_publisher_cache",
             "encoder": self.encoder,
+            "cache_size": self.cache_size,
+            "warm_slots": warm_slots,
             "active_slot": self._active_slot if alive else None,
-            "publisher_pid": process.pid if alive and process else None,
+            "publisher_pid": active_process.pid if alive and active_process else None,
             "publisher_alive": alive,
+            "publishers": [
+                {"slot": slot, "pid": self._processes[slot].pid}
+                for slot in warm_slots
+            ],
             "activated_at": self._activated_at if alive else None,
             "last_activation_ms": self._last_activation_ms,
         }
 
-    def activate(self, slot: int) -> dict[str, object]:
+    def _validate_slot(self, slot: int) -> dict[str, object]:
         identity = source_identity(slot)
         if not identity.get("ok"):
             raise StreamPublisherError(str(identity.get("error") or f"slot {slot} is unavailable"))
         if identity.get("aspect_is_16_9") is not True:
             raise StreamPublisherError(f"slot {slot} is not 16:9")
+        return identity
+
+    def _start_slot_locked(
+        self,
+        slot: int,
+        identity: dict[str, object],
+    ) -> tuple[bool, int]:
+        process = self._processes.get(slot)
+        if process is not None and process.poll() is None and self._path_online(slot):
+            self._last_used[slot] = time.monotonic()
+            return True, 0
+        if process is not None:
+            self._stop_slot_locked(slot)
+
+        started = time.perf_counter()
+        path_name = self._path_name(slot)
+        stdout_handle = (RUNTIME / f"{path_name}.ffmpeg.out.log").open("wb")
+        stderr_handle = (RUNTIME / f"{path_name}.ffmpeg.err.log").open("wb")
+        process = subprocess.Popen(
+            self._publisher_args(identity),
+            cwd=str(ROOT),
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        self._processes[slot] = process
+        self._stdout_handles[slot] = stdout_handle
+        self._stderr_handles[slot] = stderr_handle
+        self._last_used[slot] = time.monotonic()
+
+        deadline = time.perf_counter() + 3.0
+        while time.perf_counter() < deadline:
+            if process.poll() is not None:
+                tail = self._log_tail(slot)
+                self._stop_slot_locked(slot)
+                raise StreamPublisherError(
+                    f"slot {slot} publisher exited during activation"
+                    + (f": {tail}" if tail else "")
+                )
+            if self._path_online(slot):
+                return False, round((time.perf_counter() - started) * 1000)
+            time.sleep(0.04)
+
+        tail = self._log_tail(slot)
+        self._stop_slot_locked(slot)
+        raise StreamPublisherError(
+            f"slot {slot} publisher did not reach MediaMTX within 3000 ms"
+            + (f": {tail}" if tail else "")
+        )
+
+    def _prune_locked(self, keep: set[int]) -> None:
+        while len(self._processes) > self.cache_size:
+            candidates = [slot for slot in self._processes if slot not in keep]
+            if not candidates:
+                candidates = [slot for slot in self._processes if slot != self._active_slot]
+            if not candidates:
+                break
+            victim = min(candidates, key=lambda slot: self._last_used.get(slot, 0.0))
+            self._stop_slot_locked(victim)
+
+    def activate(self, slot: int) -> dict[str, object]:
+        identity = self._validate_slot(slot)
 
         with self._lock:
-            if (
-                self._active_slot == slot
-                and self._process is not None
-                and self._process.poll() is None
-                and self._path_online(slot)
-            ):
-                return {**self.status(), "reused": True, "activation_ms": 0}
-
-            self._stop_locked()
-            started = time.perf_counter()
-            path_name = self._path_name(slot)
-            stdout_path = RUNTIME / f"{path_name}.ffmpeg.out.log"
-            stderr_path = RUNTIME / f"{path_name}.ffmpeg.err.log"
-            self._stdout_handle = stdout_path.open("wb")
-            self._stderr_handle = stderr_path.open("wb")
-            self._process = subprocess.Popen(
-                self._publisher_args(identity),
-                cwd=str(ROOT),
-                stdout=self._stdout_handle,
-                stderr=self._stderr_handle,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            reused, elapsed_ms = self._start_slot_locked(slot, identity)
             self._active_slot = slot
-            deadline = time.perf_counter() + 3.0
-            while time.perf_counter() < deadline:
-                if self._process.poll() is not None:
-                    tail = self._log_tail(slot)
-                    self._stop_locked()
-                    raise StreamPublisherError(
-                        f"slot {slot} publisher exited during activation"
-                        + (f": {tail}" if tail else "")
-                    )
-                if self._path_online(slot):
-                    elapsed_ms = round((time.perf_counter() - started) * 1000)
-                    self._activated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                    self._last_activation_ms = elapsed_ms
-                    self._write_state()
-                    return {**self.status(), "reused": False, "activation_ms": elapsed_ms}
-                time.sleep(0.04)
+            self._last_used[slot] = time.monotonic()
+            self._activated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._last_activation_ms = elapsed_ms
+            self._prune_locked({slot})
+            self._write_state()
+            return {**self.status(), "reused": reused, "activation_ms": elapsed_ms}
 
-            tail = self._log_tail(slot)
-            self._stop_locked()
+    def prewarm(self, slots: list[int]) -> dict[str, object]:
+        ordered_slots = list(dict.fromkeys(slots))
+        if not ordered_slots:
+            raise StreamPublisherError("prewarm requires at least one slot")
+        if len(ordered_slots) > self.cache_size:
             raise StreamPublisherError(
-                f"slot {slot} publisher did not reach MediaMTX within 3000 ms"
-                + (f": {tail}" if tail else "")
+                f"prewarm accepts at most {self.cache_size} slots"
             )
+        identities = {slot: self._validate_slot(slot) for slot in ordered_slots}
+        timings: dict[str, int] = {}
+        reused_slots: list[int] = []
+        with self._lock:
+            keep = set(ordered_slots)
+            for existing in list(self._processes):
+                if existing not in keep and existing != self._active_slot:
+                    self._stop_slot_locked(existing)
+            for slot in ordered_slots:
+                reused, elapsed_ms = self._start_slot_locked(slot, identities[slot])
+                timings[str(slot)] = elapsed_ms
+                if reused:
+                    reused_slots.append(slot)
+            self._prune_locked(keep)
+            self._write_state()
+            return {
+                **self.status(),
+                "requested_slots": ordered_slots,
+                "reused_slots": reused_slots,
+                "activation_ms_by_slot": timings,
+            }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -646,6 +717,25 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
                 self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
+        if path == "/api/v1/prewarm":
+            if not self.publisher_controller:
+                self._json(
+                    {"ok": False, "error": "stream publisher controller is disabled"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            try:
+                payload = self._read_json_body()
+                requested = payload.get("slots")
+                if not isinstance(requested, list):
+                    raise ValueError("slots must be an array")
+                slots = [int(slot) for slot in requested]
+                if any(slot not in self.slots for slot in slots):
+                    raise ValueError(f"slots must be selected from {self.slots}")
+                self._json(self.publisher_controller.prewarm(slots))
+            except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
+                self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
         if path != "/api/v1/input":
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -688,6 +778,7 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--bitrate-kbps", type=int, default=6000)
+    parser.add_argument("--publisher-cache-size", type=int, default=3)
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
     args = parser.parse_args()
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
@@ -715,6 +806,7 @@ def main() -> int:
             fps=args.fps,
             bitrate_kbps=args.bitrate_kbps,
             mediamtx_api=args.mediamtx_api,
+            cache_size=args.publisher_cache_size,
         )
         Handler.publisher_controller = publisher_controller
         atexit.register(publisher_controller.stop)

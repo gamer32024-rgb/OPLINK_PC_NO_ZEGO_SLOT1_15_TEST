@@ -12,7 +12,7 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 | Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[15]` title fallback |
 | Capture | FFmpeg `gfxcapture` Windows Graphics Capture by HWND; occluded windows remain observable |
 | Current source geometry | `1280x720` logical at 150% DPI, producing `1920x1080` WGC frames |
-| Publisher | One hardware H.264 publisher for the slot currently selected by the iPhone |
+| Publisher | Three-entry hardware H.264 warm cache: current, previous, and next available slot |
 | Output | H.264 Constrained Baseline, `1920x1080`, 30 fps, 6 Mbps, no B-frames |
 | Display | Native iOS `RTCMTLVideoView`, aspect-fit, landscape |
 | Network | Tailscale Serve for HTTPS/WHEP; media ICE advertises only the host Tailscale IPv4 |
@@ -20,18 +20,18 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 | Input target | iPhone-to-HID round trip below 300 ms through authenticated live-touch relay |
 | Control owner | `GUI_TEST_PC`; iOS calls only the stream input relay and `/gui-test-pc/api/...` bridge endpoints |
 
-The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows stops the old exact-HWND publisher, starts the new one, waits until its MediaMTX path is online, and then returns success.
+The host exposes all 15 source identities, but never keeps 15 encoders running. Before opening WHEP, iOS calls `POST /oplink-test/api/v1/activate` for the selected slot. Windows retains up to three exact-HWND publishers and iOS retains their WHEP peers. The visible renderer is moved only after the selected peer has decoded a frame, so the old frame remains visible during a cold switch.
 
 Live game taps and drags remain Pico HID touchscreen reports through GUI_TEST_PC. The legacy-style iOS keyboard panel uses authenticated `text` and `key` messages, then GUI_TEST_PC activates the selected slot and sends Windows keyboard input. Keyboard support never changes touch input to mouse fallback.
 
-This design is required on the current host. A live 15-publisher trial reached the NVIDIA hardware-session ceiling after eight sessions, while 15 concurrent `libx264` publishers could not maintain 30 fps. The single-active publisher keeps the correct observation behavior during GUI_TEST_PC playback without wasting 15 encoder sessions.
+This bounded cache is required on the current host. A live 15-publisher trial reached the NVIDIA hardware-session ceiling after eight sessions, while 15 concurrent `libx264` publishers could not maintain 30 fps. Three warm publishers cover sequential previous/next navigation without wasting 15 encoder sessions. A random jump to a slot outside the warm set remains a cold switch and is not claimed to meet the one-second target.
 
-Measured locally on 2026-07-18:
+Measured locally on 2026-07-19:
 
-- all slots 1 through 15 activated successfully;
-- non-reused publisher activation averaged about 357 ms and never exceeded 396 ms;
-- exactly one FFmpeg process remained alive throughout the sweep;
-- RTSP probe reported H.264 Constrained Baseline, `1920x1080`, `30/1` fps, and zero B-frames.
+- slots 1, 14, and 15 remained online together at 30 fps and `1920x1080`;
+- cold publisher warm-up took 476-478 ms for slots 14 and 15;
+- warmed host activation reported 0 ms, with repeated local API wall time normally 5-9 ms;
+- each FFmpeg process used about 84 MB working set during the three-publisher test.
 
 These are host-side measurements. The final switch acceptance gate remains the native iPhone first-rendered-frame measurement.
 

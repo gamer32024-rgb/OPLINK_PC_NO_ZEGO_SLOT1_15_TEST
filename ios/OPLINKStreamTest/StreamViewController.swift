@@ -35,7 +35,11 @@ final class StreamViewController: UIViewController {
     private let streamAPI = StreamAPI()
     private let guiAPI = GUIBridgeAPI()
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
-    private lazy var whepClient = WHEPClient()
+    private var whepClients: [Int: WHEPClient] = [:]
+    private var activeWHEPSlot: Int?
+    private var pendingWHEPSlot: Int?
+    private var desiredWarmSlots = Set<Int>()
+    private var prewarmSequence = 0
 
     private var selectedSlot = 1
     private var connectionSequence = 0
@@ -46,6 +50,7 @@ final class StreamViewController: UIViewController {
     private var renderedFPS = 0
     private var lastSwitchMilliseconds: Int?
     private var lastPublisherActivationMilliseconds: Int?
+    private var lastWHEPConnectMilliseconds: Int?
     private var lastInputRTTMilliseconds: Int?
     private var lastHostToHIDMilliseconds: Double?
     private var lastInputBackend = "disabled"
@@ -129,7 +134,7 @@ final class StreamViewController: UIViewController {
         metricsTimer?.invalidate()
         bridgeTimer?.invalidate()
         keyboardFlushTask?.cancel()
-        whepClient.stop()
+        whepClients.values.forEach { $0.stop() }
     }
 
     private func buildLayout() {
@@ -552,12 +557,6 @@ final class StreamViewController: UIViewController {
             self?.renderedSize = size
             self?.updateMetrics()
         }
-        whepClient.onStateChanged = { [weak self] state in
-            self?.setStatus(state, good: state == "ICE 已連線" || state == "解碼中")
-        }
-        whepClient.onError = { [weak self] error in
-            self?.setStatus(error.localizedDescription, good: false)
-        }
         touchOverlay.onCommand = { [weak self] command in
             guard let self else { return }
             if command.action == "down",
@@ -707,12 +706,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func adjacentAvailableSlot(step: Int) -> Int {
-        for offset in 1...15 {
-            let zeroBased = (selectedSlot - 1 + step * offset + 150) % 15
-            let candidate = zeroBased + 1
-            if availableStreamSlots.contains(candidate) { return candidate }
-        }
-        return selectedSlot
+        adjacentAvailableSlot(from: selectedSlot, step: step)
     }
 
     private func connect(slot: Int) {
@@ -725,17 +719,15 @@ final class StreamViewController: UIViewController {
         connectionSequence += 1
         let sequence = connectionSequence
         switchStartedAt = Date()
+        pendingWHEPSlot = slot
         lastSwitchMilliseconds = nil
         lastPublisherActivationMilliseconds = nil
-        renderedFPS = 0
-        renderedSize = .zero
+        lastWHEPConnectMilliseconds = nil
         lastInputRTTMilliseconds = nil
         lastHostToHIDMilliseconds = nil
         inputQueue.removeAll()
         inputInFlight = false
         touchOverlay.isUserInteractionEnabled = false
-        frameMonitor.reset()
-        whepClient.stop()
         refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
@@ -811,13 +803,118 @@ final class StreamViewController: UIViewController {
                     }
                     self.lastPublisherActivationMilliseconds = activation.activationMs
                     self.updateMetrics()
-                    self.whepClient.connect(
-                        endpoint: StreamEndpoint.whep(base: baseURL, slot: slot),
-                        renderer: self.frameMonitor
-                    )
+                    self.connectOrDisplayWHEP(baseURL: baseURL, slot: slot)
+                    self.prewarmAdjacentStreams(baseURL: baseURL, around: slot)
                 }
             }
         }
+    }
+
+    private func whepClient(baseURL _: URL, slot: Int) -> WHEPClient {
+        if let existing = whepClients[slot] { return existing }
+        let client = WHEPClient()
+        client.onReady = { [weak self] elapsedMs in
+            guard let self else { return }
+            if self.selectedSlot == slot {
+                self.lastWHEPConnectMilliseconds = elapsedMs
+                self.displayWHEP(slot: slot)
+            }
+        }
+        client.onStateChanged = { [weak self] state in
+            guard let self, self.selectedSlot == slot else { return }
+            self.setStatus(state, good: state == "ICE 已連線" || state == "解碼中")
+        }
+        client.onError = { [weak self] error in
+            guard let self else { return }
+            self.whepClients[slot]?.stop()
+            self.whepClients.removeValue(forKey: slot)
+            if self.selectedSlot == slot {
+                self.setStatus(error.localizedDescription, good: false)
+            }
+        }
+        whepClients[slot] = client
+        return client
+    }
+
+    private func connectOrDisplayWHEP(baseURL: URL, slot: Int) {
+        let client = whepClient(baseURL: baseURL, slot: slot)
+        if client.isReady {
+            lastWHEPConnectMilliseconds = 0
+            displayWHEP(slot: slot)
+            return
+        }
+        guard !client.isStarted else { return }
+        client.connect(endpoint: StreamEndpoint.whep(base: baseURL, slot: slot))
+    }
+
+    private func displayWHEP(slot: Int) {
+        guard selectedSlot == slot,
+              pendingWHEPSlot == slot,
+              let client = whepClients[slot],
+              client.isReady else { return }
+        if let activeWHEPSlot, activeWHEPSlot != slot {
+            whepClients[activeWHEPSlot]?.setRenderer(nil)
+        }
+        frameMonitor.reset()
+        renderedFPS = 0
+        renderedSize = .zero
+        client.setRenderer(frameMonitor)
+        activeWHEPSlot = slot
+        pendingWHEPSlot = nil
+        pruneWHEPClients()
+    }
+
+    private func adjacentAvailableSlot(from origin: Int, step: Int) -> Int {
+        for offset in 1...15 {
+            let zeroBased = (origin - 1 + step * offset + 150) % 15
+            let candidate = zeroBased + 1
+            if availableStreamSlots.contains(candidate) { return candidate }
+        }
+        return origin
+    }
+
+    private func prewarmAdjacentStreams(baseURL: URL, around slot: Int) {
+        let previous = adjacentAvailableSlot(from: slot, step: -1)
+        let next = adjacentAvailableSlot(from: slot, step: 1)
+        var ordered = [slot]
+        if !ordered.contains(previous) { ordered.append(previous) }
+        if !ordered.contains(next) { ordered.append(next) }
+        desiredWarmSlots = Set(ordered)
+        prewarmSequence += 1
+        let sequence = prewarmSequence
+        streamAPI.prewarm(baseURL: baseURL, slots: ordered) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self,
+                      sequence == self.prewarmSequence,
+                      self.selectedSlot == slot else { return }
+                guard case .success(let response) = result else { return }
+                for warmSlot in ordered where response.warmSlots.contains(warmSlot) {
+                    let client = self.whepClient(baseURL: baseURL, slot: warmSlot)
+                    if !client.isReady && !client.isStarted {
+                        client.connect(endpoint: StreamEndpoint.whep(base: baseURL, slot: warmSlot))
+                    }
+                }
+                self.pruneWHEPClients()
+            }
+        }
+    }
+
+    private func pruneWHEPClients() {
+        var keep = desiredWarmSlots
+        if let activeWHEPSlot { keep.insert(activeWHEPSlot) }
+        for slot in Array(whepClients.keys) where !keep.contains(slot) {
+            whepClients[slot]?.stop()
+            whepClients.removeValue(forKey: slot)
+        }
+    }
+
+    private func resetWHEPClients() {
+        whepClients.values.forEach { $0.stop() }
+        whepClients.removeAll()
+        activeWHEPSlot = nil
+        pendingWHEPSlot = nil
+        desiredWarmSlots.removeAll()
+        prewarmSequence += 1
     }
 
     private func updateSourceLabel(source: StreamSource, response: StreamSourcesResponse) {
@@ -856,9 +953,10 @@ final class StreamViewController: UIViewController {
             : "\(Int(renderedSize.width))x\(Int(renderedSize.height))"
         let switchText = lastSwitchMilliseconds.map { "\($0)ms" } ?? "--"
         let activationText = lastPublisherActivationMilliseconds.map { "\($0)ms" } ?? "--"
+        let whepText = lastWHEPConnectMilliseconds.map { "\($0)ms" } ?? "--"
         let inputRTT = lastInputRTTMilliseconds.map { "\($0)ms" } ?? "--"
         let hostToHID = lastHostToHIDMilliseconds.map { String(format: "%.1fms", $0) } ?? "--"
-        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nPUBLISHER \(activationText)   INPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
+        metricsLabel.text = "SLOT \(selectedSlot)   VIDEO \(sizeText)   FPS \(renderedFPS)   SWITCH \(switchText)\nPUBLISHER \(activationText)   WHEP \(whepText)   INPUT RTT \(inputRTT)   HOST→HID \(hostToHID)   BACKEND \(lastInputBackend)"
         if let switchMs = lastSwitchMilliseconds {
             targetLabel.textColor = switchMs <= 1000
                 ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
@@ -1212,6 +1310,7 @@ final class StreamViewController: UIViewController {
                 } else {
                     UserDefaults.standard.set(token, forKey: Defaults.inputToken)
                 }
+                self.resetWHEPClients()
                 self.connect(slot: self.selectedSlot)
                 self.refreshGUIBridgeState()
             } catch {

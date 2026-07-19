@@ -60,6 +60,38 @@ final class StreamAPI {
         }.resume()
     }
 
+    func prewarm(
+        baseURL: URL,
+        slots: [Int],
+        completion: @escaping (Result<StreamPrewarmResponse, Error>) -> Void
+    ) {
+        var request = URLRequest(url: StreamEndpoint.prewarm(base: baseURL))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(StreamPrewarmRequest(slots: slots))
+        request.timeoutInterval = 8
+        session.dataTask(with: request) { data, response, error in
+            if let error { completion(.failure(error)); return }
+            guard let http = response as? HTTPURLResponse, let data else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+                completion(.failure(StreamInputError.rejected(
+                    statusCode: http.statusCode,
+                    message: message ?? "Prewarm failed: HTTP \(http.statusCode)"
+                )))
+                return
+            }
+            do {
+                completion(.success(try JSONDecoder().decode(StreamPrewarmResponse.self, from: data)))
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+
     func sendInput(
         baseURL: URL,
         token: String,

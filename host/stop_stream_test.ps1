@@ -20,6 +20,7 @@ if (Test-Path -LiteralPath $ActivePublisherPath) {
     try {
         $activePublisher = Get-Content -LiteralPath $ActivePublisherPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($activePublisher.publisher_pid) { $ids += [int]$activePublisher.publisher_pid }
+        $ids += @($activePublisher.publishers | ForEach-Object { $_.pid })
     } catch {
     }
 }

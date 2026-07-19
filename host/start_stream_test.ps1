@@ -7,6 +7,8 @@ param(
     [int]$Fps = 30,
     [ValidateRange(250, 20000)]
     [int]$BitrateKbps = 6000,
+    [ValidateRange(1, 5)]
+    [int]$PublisherCacheSize = 3,
     [ValidateSet("auto", "nvenc", "mf", "x264")]
     [string]$Encoder = "auto",
     [string]$FFmpegPath,
@@ -82,6 +84,11 @@ function Stop-StartedProcesses {
             $activePublisher = Get-Content -LiteralPath $activePublisherPath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($activePublisher.publisher_pid) {
                 Stop-Process -Id ([int]$activePublisher.publisher_pid) -Force -ErrorAction SilentlyContinue
+            }
+            foreach ($publisher in @($activePublisher.publishers)) {
+                if ($publisher.pid) {
+                    Stop-Process -Id ([int]$publisher.pid) -Force -ErrorAction SilentlyContinue
+                }
             }
         } catch {
         }
@@ -313,7 +320,8 @@ try {
         $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
         "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
         "--width", "$profileWidth", "--height", "$profileHeight",
-        "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps"
+        "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps",
+        "--publisher-cache-size", "$PublisherCacheSize"
     )
     if ($inputMode -eq "direct") {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
@@ -325,7 +333,8 @@ try {
 
     $state = [ordered]@{
         started_at = (Get-Date).ToUniversalTime().ToString("o")
-        publisher_mode = "single_active_publisher"
+        publisher_mode = "warm_publisher_cache"
+        publisher_cache_size = $PublisherCacheSize
         profile = [ordered]@{
             encoded = [ordered]@{ w = $profileWidth; h = $profileHeight }
             fps = $Fps
@@ -393,11 +402,11 @@ try {
     $activation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ApiPort/api/v1/activate" `
         -ContentType "application/json" -Body (@{ slot = 1 } | ConvertTo-Json -Compress) -TimeoutSec 8
     if (!$activation.publisher_alive -or [int]$activation.active_slot -ne 1) {
-        throw "The single active publisher did not activate slot 1."
+        throw "The active publisher cache did not activate slot 1."
     }
 
     Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
-    Write-Host "Publisher: single-active slot 1 | activation=$($activation.activation_ms)ms"
+    Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `
