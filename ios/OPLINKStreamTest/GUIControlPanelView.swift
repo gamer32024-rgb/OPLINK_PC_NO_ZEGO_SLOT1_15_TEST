@@ -33,8 +33,6 @@ final class GUIControlPanelView: UIView {
     private var presets: [GUIModuleChainPreset] = []
     private var activeChainIndex = 0
     private var activePresetIndex: Int?
-    private var heartbeatFresh = false
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         build()
@@ -65,7 +63,6 @@ final class GUIControlPanelView: UIView {
         self.runningSlots = runningSlots
         self.playingSlots = playingSlots
         self.slotPlaybackStatus = slotPlaybackStatus
-        self.heartbeatFresh = heartbeatFresh
         self.presets = normalizedPresets(presets)
 
         let available = Set(modules.keys)
@@ -95,8 +92,6 @@ final class GUIControlPanelView: UIView {
         refreshSlotButtons()
         refreshChainButtons()
         refreshPresetButtons()
-        let heartbeat = heartbeatFresh ? "HEARTBEAT 正常" : "HEARTBEAT 過期"
-        slotSummaryLabel.text = "視窗 \(runningSlots.count) / 15  \(heartbeat)"
     }
 
     func finishPresetSave(_ updatedPresets: [GUIModuleChainPreset]) {
@@ -124,35 +119,21 @@ final class GUIControlPanelView: UIView {
         card.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
         addSubview(card)
 
-        let title = UILabel()
-        title.text = "GUI_TEST_PC"
-        title.textColor = .white
-        title.font = .monospacedSystemFont(ofSize: 18, weight: .heavy)
-        let subtitle = UILabel()
-        subtitle.text = "BRIDGE ONLY  •  EXECUTION OWNER: WINDOWS GUI"
-        subtitle.textColor = UIColor(red: 0.43, green: 0.86, blue: 0.94, alpha: 1)
-        subtitle.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
-        let titleStack = UIStackView(arrangedSubviews: [title, subtitle])
-        titleStack.axis = .vertical
-        titleStack.spacing = 1
-
         let refresh = iconButton("arrow.clockwise", label: "重新整理")
         refresh.addTarget(self, action: #selector(refreshTapped), for: .touchUpInside)
         let close = iconButton("xmark", label: "關閉控制面板")
         close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        let header = UIStackView(arrangedSubviews: [titleStack, UIView(), refresh, close])
-        header.axis = .horizontal
-        header.alignment = .center
-        header.spacing = 8
 
-        let body = UIStackView(arrangedSubviews: [buildSlotsColumn(), buildModulesColumn()])
+        let body = UIStackView(arrangedSubviews: [
+            buildSlotsColumn(),
+            buildModulesColumn(refreshButton: refresh, closeButton: close)
+        ])
         body.axis = .horizontal
         body.spacing = 18
         body.distribution = .fillEqually
 
-        let mainStack = UIStackView(arrangedSubviews: [header, divider(), body])
+        let mainStack = UIStackView(arrangedSubviews: [body])
         mainStack.axis = .vertical
-        mainStack.spacing = 8
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mainStack)
 
@@ -180,7 +161,7 @@ final class GUIControlPanelView: UIView {
     }
 
     private func buildSlotsColumn() -> UIView {
-        slotSummaryLabel.text = "視窗 0 / 15"
+        slotSummaryLabel.text = "遊戲視窗 · 已選 0 · 運行 0"
         styleSectionLabel(slotSummaryLabel)
 
         let grid = UIStackView()
@@ -225,9 +206,18 @@ final class GUIControlPanelView: UIView {
         return stack
     }
 
-    private func buildModulesColumn() -> UIView {
+    private func buildModulesColumn(refreshButton: UIButton, closeButton: UIButton) -> UIView {
         moduleSummaryLabel.text = "模組連串 0 / 10"
         styleSectionLabel(moduleSummaryLabel)
+        let moduleHeader = UIStackView(arrangedSubviews: [
+            moduleSummaryLabel,
+            UIView(),
+            refreshButton,
+            closeButton
+        ])
+        moduleHeader.axis = .horizontal
+        moduleHeader.alignment = .center
+        moduleHeader.spacing = 7
 
         let chainGrid = UIStackView()
         chainGrid.axis = .vertical
@@ -276,7 +266,7 @@ final class GUIControlPanelView: UIView {
         statusLabel.numberOfLines = 2
 
         let presetTitle = UILabel()
-        presetTitle.text = "連串預設（點擊後編輯及命名）"
+        presetTitle.text = "連串預設（點擊播放，長按編輯）"
         presetTitle.textColor = UIColor.white.withAlphaComponent(0.9)
         presetTitle.font = .systemFont(ofSize: 10, weight: .bold)
         let presetGrid = UIStackView()
@@ -297,6 +287,12 @@ final class GUIControlPanelView: UIView {
                 button.titleLabel?.numberOfLines = 2
                 button.titleLabel?.textAlignment = .center
                 button.addTarget(self, action: #selector(presetTapped(_:)), for: .touchUpInside)
+                let longPress = UILongPressGestureRecognizer(
+                    target: self,
+                    action: #selector(presetLongPressed(_:))
+                )
+                longPress.minimumPressDuration = 0.45
+                button.addGestureRecognizer(longPress)
                 button.heightAnchor.constraint(equalToConstant: 27).isActive = true
                 row.addArrangedSubview(button)
             }
@@ -304,7 +300,7 @@ final class GUIControlPanelView: UIView {
         }
 
         let stack = UIStackView(arrangedSubviews: [
-            moduleSummaryLabel,
+            moduleHeader,
             chainGrid,
             actionRow([play, clear, stop]),
             actionRow([startAll, startSelected, arrange]),
@@ -357,11 +353,15 @@ final class GUIControlPanelView: UIView {
         for index in 0..<10 {
             let button = chooserStepButtons[index]
             button.tag = index
-            button.setTitle("\(index + 1)", for: .normal)
-            button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 10, weight: .bold)
+            button.setTitle("\(index + 1)\n＋", for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 8.5, weight: .bold)
+            button.titleLabel?.numberOfLines = 2
+            button.titleLabel?.textAlignment = .center
+            button.titleLabel?.adjustsFontSizeToFitWidth = true
+            button.titleLabel?.minimumScaleFactor = 0.65
             button.layer.cornerRadius = 6
             button.addTarget(self, action: #selector(chooserStepTapped(_:)), for: .touchUpInside)
-            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 36).isActive = true
             stepRow.addArrangedSubview(button)
         }
 
@@ -444,6 +444,7 @@ final class GUIControlPanelView: UIView {
     }
 
     private func refreshSlotButtons() {
+        slotSummaryLabel.text = "遊戲視窗 · 已選 \(selectedSlots.count) · 運行 \(runningSlots.count)"
         for button in slotButtons {
             let slot = button.tag
             let running = runningSlots.contains(slot)
@@ -477,6 +478,9 @@ final class GUIControlPanelView: UIView {
             button.setTitleColor(.white, for: .normal)
         }
         for button in chooserStepButtons {
+            let index = button.tag
+            let name = moduleChain[index]
+            button.setTitle(name.map { "\(index + 1)\n\($0)" } ?? "\(index + 1)\n＋", for: .normal)
             let active = button.tag == activeChainIndex
             button.backgroundColor = active
                 ? UIColor(red: 0.47, green: 0.86, blue: 0.94, alpha: 1)
@@ -501,6 +505,9 @@ final class GUIControlPanelView: UIView {
                 ? UIColor(red: 0.12, green: 0.34, blue: 0.55, alpha: 1)
                 : UIColor(red: 0.08, green: 0.5, blue: 0.45, alpha: 1)
             button.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+            button.accessibilityHint = preset.modules.isEmpty
+                ? "空白預設，點擊設定"
+                : "點擊播放；長按編輯。\(preset.modules.joined(separator: "，"))"
         }
     }
 
@@ -614,6 +621,25 @@ final class GUIControlPanelView: UIView {
 
     @objc private func presetTapped(_ sender: UIButton) {
         let index = sender.tag
+        let preset = presets.first { $0.index == index }
+            ?? GUIModuleChainPreset(index: index, name: "連串 \(index)", modules: [])
+        guard !preset.modules.isEmpty else {
+            editPreset(index)
+            return
+        }
+        guard let slots = requireSelectedSlots() else { return }
+        selectedSlots.removeAll()
+        refreshSlotButtons()
+        setStatus("播放 \(preset.name)：\(preset.modules.joined(separator: " > "))", good: true)
+        onPlay?(slots, preset.modules)
+    }
+
+    @objc private func presetLongPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let button = gesture.view as? UIButton else { return }
+        editPreset(button.tag)
+    }
+
+    private func editPreset(_ index: Int) {
         let preset = presets.first { $0.index == index }
             ?? GUIModuleChainPreset(index: index, name: "連串 \(index)", modules: [])
         activePresetIndex = index
