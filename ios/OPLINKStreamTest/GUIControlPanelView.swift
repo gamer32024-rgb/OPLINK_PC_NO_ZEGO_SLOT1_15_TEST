@@ -20,6 +20,7 @@ final class GUIControlPanelView: UIView {
     private let moduleChooser = UIView()
     private let moduleChooserTitle = UILabel()
     private let moduleGroupsStack = UIStackView()
+    private let quickModuleGroupsStack = UIStackView()
     private let chooserStepButtons = (0..<10).map { _ in UIButton(type: .system) }
     private let savePresetButton = UIButton(type: .system)
 
@@ -124,20 +125,20 @@ final class GUIControlPanelView: UIView {
         let close = iconButton("xmark", label: "關閉控制面板")
         close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
 
-        let body = UIStackView(arrangedSubviews: [
-            buildSlotsColumn(),
-            buildModulesColumn(refreshButton: refresh, closeButton: close)
-        ])
+        let slotsColumn = buildSlotsColumn()
+        let modulesColumn = buildModulesColumn(refreshButton: refresh, closeButton: close)
+        let body = UIStackView(arrangedSubviews: [slotsColumn, modulesColumn])
         body.axis = .horizontal
         body.spacing = 18
-        body.distribution = .fillEqually
+        body.distribution = .fill
+        slotsColumn.widthAnchor.constraint(equalTo: body.widthAnchor, multiplier: 0.42).isActive = true
 
         let mainStack = UIStackView(arrangedSubviews: [body])
         mainStack.axis = .vertical
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mainStack)
 
-        let preferredWidth = card.widthAnchor.constraint(equalToConstant: 700)
+        let preferredWidth = card.widthAnchor.constraint(equalToConstant: 760)
         preferredWidth.priority = .defaultHigh
         let preferredHeight = card.heightAnchor.constraint(equalToConstant: 382)
         preferredHeight.priority = .defaultHigh
@@ -178,7 +179,7 @@ final class GUIControlPanelView: UIView {
                 let button = slotButtons[slot - 1]
                 button.tag = slot
                 button.setTitle(String(format: "%02d", slot), for: .normal)
-                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
                 button.layer.cornerRadius = 8
                 button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
                 button.heightAnchor.constraint(equalToConstant: 31).isActive = true
@@ -200,7 +201,36 @@ final class GUIControlPanelView: UIView {
         hint.font = .systemFont(ofSize: 9, weight: .medium)
         hint.adjustsFontSizeToFitWidth = true
 
-        let stack = UIStackView(arrangedSubviews: [slotSummaryLabel, grid, actionRow([selectAll, clear, restart]), hint])
+        let quickModulesTitle = UILabel()
+        quickModulesTitle.text = "單獨模組（點擊加入連串）"
+        quickModulesTitle.textColor = UIColor.white.withAlphaComponent(0.92)
+        quickModulesTitle.font = .systemFont(ofSize: 11, weight: .bold)
+
+        let quickModulesScroll = UIScrollView()
+        quickModulesScroll.showsVerticalScrollIndicator = true
+        quickModulesScroll.alwaysBounceVertical = false
+        quickModuleGroupsStack.axis = .vertical
+        quickModuleGroupsStack.spacing = 7
+        quickModuleGroupsStack.translatesAutoresizingMaskIntoConstraints = false
+        quickModulesScroll.addSubview(quickModuleGroupsStack)
+        NSLayoutConstraint.activate([
+            quickModulesScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 118),
+            quickModuleGroupsStack.leadingAnchor.constraint(equalTo: quickModulesScroll.contentLayoutGuide.leadingAnchor),
+            quickModuleGroupsStack.trailingAnchor.constraint(equalTo: quickModulesScroll.contentLayoutGuide.trailingAnchor),
+            quickModuleGroupsStack.topAnchor.constraint(equalTo: quickModulesScroll.contentLayoutGuide.topAnchor),
+            quickModuleGroupsStack.bottomAnchor.constraint(equalTo: quickModulesScroll.contentLayoutGuide.bottomAnchor),
+            quickModuleGroupsStack.widthAnchor.constraint(equalTo: quickModulesScroll.frameLayoutGuide.widthAnchor)
+        ])
+
+        let stack = UIStackView(arrangedSubviews: [
+            slotSummaryLabel,
+            grid,
+            actionRow([selectAll, clear, restart]),
+            hint,
+            divider(),
+            quickModulesTitle,
+            quickModulesScroll
+        ])
         stack.axis = .vertical
         stack.spacing = 6
         return stack
@@ -232,11 +262,13 @@ final class GUIControlPanelView: UIView {
                 let button = chainButtons[index]
                 button.tag = index
                 button.layer.cornerRadius = 7
-                button.titleLabel?.font = .systemFont(ofSize: 9, weight: .bold)
+                button.titleLabel?.font = .systemFont(ofSize: 11, weight: .bold)
                 button.titleLabel?.numberOfLines = 2
                 button.titleLabel?.textAlignment = .center
+                button.titleLabel?.adjustsFontSizeToFitWidth = true
+                button.titleLabel?.minimumScaleFactor = 0.72
                 button.addTarget(self, action: #selector(chainTapped(_:)), for: .touchUpInside)
-                button.heightAnchor.constraint(equalToConstant: 31).isActive = true
+                button.heightAnchor.constraint(equalToConstant: 36).isActive = true
                 row.addArrangedSubview(button)
             }
             chainGrid.addArrangedSubview(row)
@@ -262,13 +294,13 @@ final class GUIControlPanelView: UIView {
 
         statusLabel.text = "等待 GUI_TEST_PC 狀態"
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.78)
-        statusLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
         statusLabel.numberOfLines = 2
 
         let presetTitle = UILabel()
-        presetTitle.text = "連串預設（點擊播放，長按編輯）"
+        presetTitle.text = "連串預設（點擊載入，長按編輯）"
         presetTitle.textColor = UIColor.white.withAlphaComponent(0.9)
-        presetTitle.font = .systemFont(ofSize: 10, weight: .bold)
+        presetTitle.font = .systemFont(ofSize: 11, weight: .bold)
         let presetGrid = UIStackView()
         presetGrid.axis = .vertical
         presetGrid.spacing = 4
@@ -283,9 +315,11 @@ final class GUIControlPanelView: UIView {
                 button.tag = index + 1
                 button.layer.cornerRadius = 7
                 button.layer.borderWidth = 1
-                button.titleLabel?.font = .systemFont(ofSize: 8.5, weight: .bold)
+                button.titleLabel?.font = .systemFont(ofSize: 10.5, weight: .bold)
                 button.titleLabel?.numberOfLines = 2
                 button.titleLabel?.textAlignment = .center
+                button.titleLabel?.adjustsFontSizeToFitWidth = true
+                button.titleLabel?.minimumScaleFactor = 0.72
                 button.addTarget(self, action: #selector(presetTapped(_:)), for: .touchUpInside)
                 let longPress = UILongPressGestureRecognizer(
                     target: self,
@@ -293,7 +327,7 @@ final class GUIControlPanelView: UIView {
                 )
                 longPress.minimumPressDuration = 0.45
                 button.addGestureRecognizer(longPress)
-                button.heightAnchor.constraint(equalToConstant: 27).isActive = true
+                button.heightAnchor.constraint(equalToConstant: 32).isActive = true
                 row.addArrangedSubview(button)
             }
             presetGrid.addArrangedSubview(row)
@@ -354,7 +388,7 @@ final class GUIControlPanelView: UIView {
             let button = chooserStepButtons[index]
             button.tag = index
             button.setTitle("\(index + 1)\n＋", for: .normal)
-            button.titleLabel?.font = .systemFont(ofSize: 8.5, weight: .bold)
+            button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
             button.titleLabel?.numberOfLines = 2
             button.titleLabel?.textAlignment = .center
             button.titleLabel?.adjustsFontSizeToFitWidth = true
@@ -381,8 +415,8 @@ final class GUIControlPanelView: UIView {
         NSLayoutConstraint.activate([
             moduleChooser.centerXAnchor.constraint(equalTo: card.centerXAnchor),
             moduleChooser.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-            moduleChooser.widthAnchor.constraint(equalTo: card.widthAnchor, multiplier: 0.72),
-            moduleChooser.heightAnchor.constraint(equalTo: card.heightAnchor, multiplier: 0.9),
+            moduleChooser.widthAnchor.constraint(equalTo: card.widthAnchor, multiplier: 0.92),
+            moduleChooser.heightAnchor.constraint(equalTo: card.heightAnchor, multiplier: 0.92),
             stack.leadingAnchor.constraint(equalTo: moduleChooser.leadingAnchor, constant: 14),
             stack.trailingAnchor.constraint(equalTo: moduleChooser.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: moduleChooser.topAnchor, constant: 12),
@@ -397,37 +431,62 @@ final class GUIControlPanelView: UIView {
 
     private func rebuildModuleButtons() {
         clearStack(moduleGroupsStack)
+        clearStack(quickModuleGroupsStack)
         guard !moduleGroups.isEmpty else {
-            let empty = UILabel()
-            empty.text = "GUI_TEST_PC 沒有可用模組"
-            empty.textColor = UIColor.white.withAlphaComponent(0.7)
-            empty.textAlignment = .center
-            moduleGroupsStack.addArrangedSubview(empty)
+            moduleGroupsStack.addArrangedSubview(emptyModulesLabel())
+            quickModuleGroupsStack.addArrangedSubview(emptyModulesLabel())
             return
         }
 
+        populateModuleGroups(
+            in: quickModuleGroupsStack,
+            columns: 3,
+            buttonHeight: 34,
+            fontSize: 11.5
+        )
+        populateModuleGroups(
+            in: moduleGroupsStack,
+            columns: 4,
+            buttonHeight: 36,
+            fontSize: 12
+        )
+    }
+
+    private func populateModuleGroups(
+        in container: UIStackView,
+        columns: Int,
+        buttonHeight: CGFloat,
+        fontSize: CGFloat
+    ) {
         for group in moduleGroups {
             let label = UILabel()
             label.text = group.name
             label.textColor = .white
-            label.font = .systemFont(ofSize: 10, weight: .bold)
+            label.font = .systemFont(ofSize: 11, weight: .bold)
 
             let grid = UIStackView()
             grid.axis = .vertical
             grid.spacing = 5
-            for start in stride(from: 0, to: group.modules.count, by: 3) {
+            for start in stride(from: 0, to: group.modules.count, by: columns) {
                 let row = UIStackView()
                 row.axis = .horizontal
                 row.spacing = 5
                 row.distribution = .fillEqually
-                for offset in 0..<3 {
+                for offset in 0..<columns {
                     let moduleIndex = start + offset
                     if group.modules.indices.contains(moduleIndex),
                        let globalIndex = moduleNames.firstIndex(of: group.modules[moduleIndex]) {
-                        let button = textButton(group.modules[moduleIndex], color: UIColor(white: 0.32, alpha: 1))
+                        let button = textButton(
+                            group.modules[moduleIndex],
+                            color: UIColor(white: 0.32, alpha: 1),
+                            height: buttonHeight,
+                            fontSize: fontSize
+                        )
                         button.tag = globalIndex
                         button.titleLabel?.numberOfLines = 2
                         button.titleLabel?.textAlignment = .center
+                        button.titleLabel?.adjustsFontSizeToFitWidth = true
+                        button.titleLabel?.minimumScaleFactor = 0.72
                         button.addTarget(self, action: #selector(moduleTapped(_:)), for: .touchUpInside)
                         row.addArrangedSubview(button)
                     } else {
@@ -439,8 +498,17 @@ final class GUIControlPanelView: UIView {
             let groupStack = UIStackView(arrangedSubviews: [label, grid])
             groupStack.axis = .vertical
             groupStack.spacing = 4
-            moduleGroupsStack.addArrangedSubview(groupStack)
+            container.addArrangedSubview(groupStack)
         }
+    }
+
+    private func emptyModulesLabel() -> UILabel {
+        let label = UILabel()
+        label.text = "GUI_TEST_PC 沒有可用模組"
+        label.textColor = UIColor.white.withAlphaComponent(0.7)
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        return label
     }
 
     private func refreshSlotButtons() {
@@ -507,7 +575,7 @@ final class GUIControlPanelView: UIView {
             button.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
             button.accessibilityHint = preset.modules.isEmpty
                 ? "空白預設，點擊設定"
-                : "點擊播放；長按編輯。\(preset.modules.joined(separator: "，"))"
+                : "點擊載入連串；長按編輯預設。\(preset.modules.joined(separator: "，"))"
         }
     }
 
@@ -530,15 +598,20 @@ final class GUIControlPanelView: UIView {
         return button
     }
 
-    private func textButton(_ title: String, color: UIColor) -> UIButton {
+    private func textButton(
+        _ title: String,
+        color: UIColor,
+        height: CGFloat = 27,
+        fontSize: CGFloat = 10
+    ) -> UIButton {
         let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
         button.setTitleColor(.white, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+        button.titleLabel?.font = .systemFont(ofSize: fontSize, weight: .bold)
         button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.backgroundColor = color
         button.layer.cornerRadius = 7
-        button.heightAnchor.constraint(equalToConstant: 27).isActive = true
+        button.heightAnchor.constraint(equalToConstant: height).isActive = true
         return button
     }
 
@@ -627,11 +700,13 @@ final class GUIControlPanelView: UIView {
             editPreset(index)
             return
         }
-        guard let slots = requireSelectedSlots() else { return }
-        selectedSlots.removeAll()
-        refreshSlotButtons()
-        setStatus("播放 \(preset.name)：\(preset.modules.joined(separator: " > "))", good: true)
-        onPlay?(slots, preset.modules)
+        activePresetIndex = nil
+        moduleChain = Array(preset.modules.prefix(10)).map { Optional($0) }
+        while moduleChain.count < 10 { moduleChain.append(nil) }
+        activeChainIndex = min(preset.modules.count, 9)
+        moduleChooser.isHidden = true
+        refreshChainButtons()
+        setStatus("已載入 \(preset.name)，可修改後按播放。", good: true)
     }
 
     @objc private func presetLongPressed(_ gesture: UILongPressGestureRecognizer) {
@@ -657,9 +732,12 @@ final class GUIControlPanelView: UIView {
 
     @objc private func moduleTapped(_ sender: UIButton) {
         guard moduleNames.indices.contains(sender.tag) else { return }
-        moduleChain[activeChainIndex] = moduleNames[sender.tag]
+        let insertedIndex = activeChainIndex
+        let moduleName = moduleNames[sender.tag]
+        moduleChain[insertedIndex] = moduleName
         if activeChainIndex < 9 { activeChainIndex += 1 }
         refreshChainButtons()
+        setStatus("第 \(insertedIndex + 1) 格已加入 \(moduleName)。", good: true)
     }
 
     @objc private func clearActiveStepTapped() {
