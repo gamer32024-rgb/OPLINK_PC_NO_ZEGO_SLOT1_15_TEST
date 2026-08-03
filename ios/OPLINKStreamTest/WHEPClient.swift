@@ -270,6 +270,7 @@ extension WHEPClient: RTCPeerConnectionDelegate {
         switch newState {
         case .connected, .completed: emitState("ICE 已連線")
         case .failed: fail(WHEPError.iceFailed)
+        case .closed: fail(WHEPError.iceClosed)
         case .disconnected: emitState("ICE 中斷")
         default: break
         }
@@ -301,6 +302,7 @@ enum WHEPError: LocalizedError {
     case invalidAnswer
     case missingVideoTrack
     case iceFailed
+    case iceClosed
 
     var errorDescription: String? {
         switch self {
@@ -309,6 +311,7 @@ enum WHEPError: LocalizedError {
         case .invalidAnswer: return "MediaMTX WHEP answer 無效。"
         case .missingVideoTrack: return "WHEP 已連線，但沒有收到 video track。"
         case .iceFailed: return "WebRTC ICE 連線失敗，請確認 iPhone Tailscale 已連線。"
+        case .iceClosed: return "WebRTC ICE session 已關閉。"
         }
     }
 }

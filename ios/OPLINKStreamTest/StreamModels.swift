@@ -7,10 +7,18 @@ struct StreamSourcesResponse: Decodable {
     let networkUnderlay: NetworkUnderlay
     let input: StreamInputInfo
     let sources: [StreamSource]
+    let streamMode: String?
+    let whepPath: String?
+    let activeSlot: Int?
+    let switchGeneration: Int?
 
     enum CodingKeys: String, CodingKey {
         case ok, profile, encoder, input, sources
         case networkUnderlay = "network_underlay"
+        case streamMode = "stream_mode"
+        case whepPath = "whep_path"
+        case activeSlot = "active_slot"
+        case switchGeneration = "switch_generation"
     }
 }
 
@@ -131,6 +139,13 @@ struct StreamActivateResponse: Decodable {
     let publisherAlive: Bool
     let reused: Bool
     let activationMs: Int
+    let streamMode: String?
+    let switchGeneration: Int?
+    let reusedTransport: Bool?
+    let hostResolveMs: Int?
+    let captureFirstFrameMs: Int?
+    let routerPID: Int?
+    let encoderPID: Int?
 
     enum CodingKeys: String, CodingKey {
         case ok, mode, encoder, reused
@@ -138,6 +153,32 @@ struct StreamActivateResponse: Decodable {
         case publisherPID = "publisher_pid"
         case publisherAlive = "publisher_alive"
         case activationMs = "activation_ms"
+        case streamMode = "stream_mode"
+        case switchGeneration = "switch_generation"
+        case reusedTransport = "reused_transport"
+        case hostResolveMs = "host_resolve_ms"
+        case captureFirstFrameMs = "capture_first_frame_ms"
+        case routerPID = "router_pid"
+        case encoderPID = "encoder_pid"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        streamMode = try container.decodeIfPresent(String.self, forKey: .streamMode)
+        mode = try container.decodeIfPresent(String.self, forKey: .mode) ?? streamMode ?? ""
+        encoder = try container.decodeIfPresent(String.self, forKey: .encoder) ?? ""
+        activeSlot = try container.decode(Int.self, forKey: .activeSlot)
+        publisherPID = try container.decodeIfPresent(Int.self, forKey: .publisherPID)
+        publisherAlive = try container.decodeIfPresent(Bool.self, forKey: .publisherAlive) ?? false
+        reusedTransport = try container.decodeIfPresent(Bool.self, forKey: .reusedTransport)
+        reused = try container.decodeIfPresent(Bool.self, forKey: .reused) ?? reusedTransport ?? false
+        activationMs = try container.decodeIfPresent(Int.self, forKey: .activationMs) ?? 0
+        switchGeneration = try container.decodeIfPresent(Int.self, forKey: .switchGeneration)
+        hostResolveMs = try container.decodeIfPresent(Int.self, forKey: .hostResolveMs)
+        captureFirstFrameMs = try container.decodeIfPresent(Int.self, forKey: .captureFirstFrameMs)
+        routerPID = try container.decodeIfPresent(Int.self, forKey: .routerPID)
+        encoderPID = try container.decodeIfPresent(Int.self, forKey: .encoderPID)
     }
 }
 
@@ -268,6 +309,10 @@ enum StreamEndpoint {
 
     static func whep(base: URL, slot: Int) -> URL {
         replacingPath(base, with: String(format: "/oplink-whep/slot%02d/whep", slot))
+    }
+
+    static func nativeWhep(base: URL) -> URL {
+        replacingPath(base, with: "/oplink-whep/oplink_active/whep")
     }
 
     static func replacingPath(_ base: URL, with path: String) -> URL {

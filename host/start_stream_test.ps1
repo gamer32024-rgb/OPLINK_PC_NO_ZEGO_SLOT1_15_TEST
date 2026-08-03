@@ -11,10 +11,13 @@ param(
     [int]$PublisherCacheSize = 3,
     [ValidateRange(5, 120)]
     [int]$ViewerIdleTimeoutSeconds = 15,
+    [ValidateSet("legacy_warm_cache", "native_single")]
+    [string]$StreamMode = "legacy_warm_cache",
     [ValidateSet("auto", "nvenc", "mf", "x264")]
     [string]$Encoder = "auto",
     [string]$FFmpegPath,
     [string]$MediaMTXPath,
+    [string]$NativeRouterPath,
     [string]$PythonPath,
     [string]$PicoConfigPath,
     [string]$SlotPidMapPath = "D:\15game\gui_test_pc_slot_pids.json",
@@ -33,6 +36,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSCommandPath
+$nativeProfileDefaults = $StreamMode -eq "native_single"
+if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("Profile")) {
+    $Profile = "720p"
+}
+if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("BitrateKbps")) {
+    $BitrateKbps = 2500
+}
 $Runtime = Join-Path $Root "runtime"
 $StatePath = Join-Path $Runtime "state.json"
 $TemplatePath = Join-Path $Root "mediamtx.template.yml"
@@ -81,11 +91,16 @@ function Start-HiddenProcess {
 
 function Stop-StartedProcesses {
     $activePublisherPath = Join-Path $Runtime "active_publisher.json"
-    if (Test-Path -LiteralPath $activePublisherPath) {
+    $nativePublisherPath = Join-Path $Runtime "native_single_publisher.json"
+    foreach ($publisherStatePath in @($activePublisherPath, $nativePublisherPath)) {
+        if (!(Test-Path -LiteralPath $publisherStatePath)) { continue }
         try {
-            $activePublisher = Get-Content -LiteralPath $activePublisherPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $activePublisher = Get-Content -LiteralPath $publisherStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($activePublisher.publisher_pid) {
                 Stop-Process -Id ([int]$activePublisher.publisher_pid) -Force -ErrorAction SilentlyContinue
+            }
+            if ($activePublisher.router_pid) {
+                Stop-Process -Id ([int]$activePublisher.router_pid) -Force -ErrorAction SilentlyContinue
             }
             foreach ($publisher in @($activePublisher.publishers)) {
                 if ($publisher.pid) {
@@ -94,7 +109,7 @@ function Stop-StartedProcesses {
             }
         } catch {
         }
-        Remove-Item -LiteralPath $activePublisherPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $publisherStatePath -Force -ErrorAction SilentlyContinue
     }
     foreach ($process in $startedProcesses) {
         if ($process -and !$process.HasExited) {
@@ -191,6 +206,13 @@ $FFmpeg = Resolve-Executable -ExplicitPath $FFmpegPath -EnvironmentPath $env:OPL
     -CommandName "ffmpeg" -Fallbacks $ffmpegFallbacks
 $MediaMTX = Resolve-Executable -ExplicitPath $MediaMTXPath -EnvironmentPath $env:OPLINK_MEDIAMTX `
     -CommandName "mediamtx" -Fallbacks @((Join-Path $Root "tools\mediamtx\mediamtx.exe"))
+$NativeRouter = if ($StreamMode -eq "native_single") {
+    Resolve-Executable -ExplicitPath $NativeRouterPath -EnvironmentPath $env:OPLINK_NATIVE_ROUTER `
+        -CommandName "oplink_capture_router" `
+        -Fallbacks @((Join-Path $Root "tools\oplink_capture_router\oplink_capture_router.exe"))
+} else {
+    $null
+}
 $Python = Resolve-Executable -ExplicitPath $PythonPath -EnvironmentPath $env:OPLINK_PYTHON `
     -CommandName "python" -Fallbacks @("C:\Users\andyb\Documents\star_cros_bot\.venv\Scripts\python.exe")
 $WorkspaceRoot = Split-Path (Split-Path $Root -Parent) -Parent
@@ -198,6 +220,9 @@ $PicoConfig = if ($PicoConfigPath) { $PicoConfigPath } else { Join-Path $Workspa
 
 if (!$FFmpeg) { throw "FFmpeg was not found. Install a build containing gfxcapture or pass -FFmpegPath." }
 if (!$MediaMTX) { throw "MediaMTX was not found. Run .\install_mediamtx.ps1 or pass -MediaMTXPath." }
+if ($StreamMode -eq "native_single" -and !$NativeRouter) {
+    throw "Native router was not found. Build it first or pass -NativeRouterPath."
+}
 if (!$Python) { throw "Python 3 was not found. Pass -PythonPath." }
 if (!(Test-Path -LiteralPath $PicoConfig -PathType Leaf)) { throw "Pico config was not found: $PicoConfig" }
 $PicoConfig = (Resolve-Path -LiteralPath $PicoConfig).Path
@@ -234,11 +259,18 @@ $networkUnderlay = Get-PhysicalUnderlayGate
 
 $profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
 $profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
-$layoutRepairText = & $Python $ServerScript --repair-stream-layout
+$layoutArguments = @("--repair-stream-layout")
+if ($StreamMode -eq "native_single") {
+    $layoutArguments += @(
+        "--client-width", "$profileWidth",
+        "--client-height", "$profileHeight"
+    )
+}
+$layoutRepairText = & $Python $ServerScript @layoutArguments
 if ($LASTEXITCODE -ne 0) { throw "Could not refresh and validate the 15 game render surfaces." }
 $layoutRepair = $layoutRepairText | ConvertFrom-Json
 if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne 15) {
-    throw "The fixed 4K stacked stream layout preflight did not refresh all 15 slots."
+    throw "The $StreamMode stream layout preflight did not refresh all 15 slots."
 }
 $identities = @()
 foreach ($slot in $Slots) {
@@ -327,11 +359,15 @@ try {
     $apiArguments = @(
         $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
         "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
+        "--publisher-mode", $StreamMode,
         "--width", "$profileWidth", "--height", "$profileHeight",
         "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps",
         "--publisher-cache-size", "$PublisherCacheSize",
         "--viewer-idle-timeout-seconds", "$ViewerIdleTimeoutSeconds"
     )
+    if ($StreamMode -eq "native_single") {
+        $apiArguments += @("--native-router", $NativeRouter, "--native-path", "oplink_active")
+    }
     if ($inputMode -eq "direct") {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
     } elseif ($inputMode -eq "gui_test_pc") {
@@ -358,7 +394,7 @@ try {
     })
     $state = [ordered]@{
         started_at = (Get-Date).ToUniversalTime().ToString("o")
-        publisher_mode = "warm_publisher_cache"
+        publisher_mode = $StreamMode
         publisher_cache_size = $PublisherCacheSize
         viewer_idle_timeout_seconds = $ViewerIdleTimeoutSeconds
         profile = [ordered]@{
@@ -431,13 +467,17 @@ try {
     $activation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ApiPort/api/v1/activate" `
         -ContentType "application/json" -Body (@{ slot = 1 } | ConvertTo-Json -Compress) -TimeoutSec 8
     if (!$activation.publisher_alive -or [int]$activation.active_slot -ne 1) {
-        throw "The active publisher cache did not activate slot 1."
+        throw "The $StreamMode publisher did not activate slot 1."
     }
 
     Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
-    Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
+    if ($StreamMode -eq "native_single") {
+        Write-Host "Publisher: native single path oplink_active | router=$($activation.router_pid) encoder=$($activation.encoder_pid) | active slot 1 | activation=$($activation.activation_ms)ms"
+    } else {
+        Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
+    }
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
-    Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/15 refreshed and fixed at 1920x1080 client"
+    Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/15 refreshed at $($layoutRepair.client_width)x$($layoutRepair.client_height) client"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `
             $identity.slot, $identity.hwnd, $identity.client_logical.w, $identity.client_logical.h, `
@@ -448,7 +488,11 @@ try {
     Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
     Write-Host "Pico input: $(if ($inputMode -eq 'disabled') { 'disabled' } elseif ($inputMode -eq 'direct') { "$($picoHealth.report_mode) direct on $($picoHealth.port)" } else { "$($guiInputHealth.report_mode) via GUI_TEST_PC on $($guiInputHealth.port)" })"
     Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
-    Write-Host "WHEP slots 1-15: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
+    if ($StreamMode -eq "native_single") {
+        Write-Host "WHEP native single: https://$tailscaleDnsName/oplink-whep/oplink_active/whep"
+    } else {
+        Write-Host "WHEP slots 1-15: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
+    }
 } catch {
     Stop-StartedProcesses
     if (Test-Path -LiteralPath $StatePath) { Remove-Item -LiteralPath $StatePath -Force }

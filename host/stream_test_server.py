@@ -17,6 +17,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from native_single_stream_controller import (
+    NativeSingleStreamController,
+    NativeSingleStreamError,
+)
 from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 
 
@@ -33,6 +37,8 @@ HARD_OUTER_WIDTH = 1942
 HARD_OUTER_HEIGHT = 1136
 HARD_CLIENT_WIDTH = 1920
 HARD_CLIENT_HEIGHT = 1080
+WINDOW_FRAME_WIDTH = HARD_OUTER_WIDTH - HARD_CLIENT_WIDTH
+WINDOW_FRAME_HEIGHT = HARD_OUTER_HEIGHT - HARD_CLIENT_HEIGHT
 RENDER_REFRESH_INSET_PX = 8
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
@@ -237,7 +243,17 @@ def _physical_window_geometry(user32: ctypes.WinDLL, hwnd: int) -> dict[str, int
     }
 
 
-def repair_stream_layout(slots: list[int]) -> dict[str, object]:
+def repair_stream_layout(
+    slots: list[int],
+    client_width: int = HARD_CLIENT_WIDTH,
+    client_height: int = HARD_CLIENT_HEIGHT,
+) -> dict[str, object]:
+    if client_width <= 0 or client_height <= 0:
+        raise ValueError("stream layout client dimensions must be positive")
+    if abs((client_width / client_height) - (16 / 9)) > 0.001:
+        raise ValueError("stream layout client dimensions must be 16:9")
+    outer_width = client_width + WINDOW_FRAME_WIDTH
+    outer_height = client_height + WINDOW_FRAME_HEIGHT
     identities = {slot: source_identity(slot) for slot in slots}
     unavailable = [
         {"slot": slot, "error": identity.get("error")}
@@ -282,8 +298,8 @@ def repair_stream_layout(slots: list[int]) -> dict[str, object]:
                 0,
                 HARD_WINDOW_X,
                 HARD_WINDOW_Y,
-                HARD_OUTER_WIDTH - RENDER_REFRESH_INSET_PX,
-                HARD_OUTER_HEIGHT - RENDER_REFRESH_INSET_PX,
+                outer_width - RENDER_REFRESH_INSET_PX,
+                outer_height - RENDER_REFRESH_INSET_PX,
                 flags,
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -296,8 +312,8 @@ def repair_stream_layout(slots: list[int]) -> dict[str, object]:
                 0,
                 HARD_WINDOW_X,
                 HARD_WINDOW_Y,
-                HARD_OUTER_WIDTH,
-                HARD_OUTER_HEIGHT,
+                outer_width,
+                outer_height,
                 flags,
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -316,16 +332,20 @@ def repair_stream_layout(slots: list[int]) -> dict[str, object]:
         for geometry in after
         if geometry["window_x"] != HARD_WINDOW_X
         or geometry["window_y"] != HARD_WINDOW_Y
-        or geometry["outer_width"] != HARD_OUTER_WIDTH
-        or geometry["outer_height"] != HARD_OUTER_HEIGHT
-        or geometry["client_width"] != HARD_CLIENT_WIDTH
-        or geometry["client_height"] != HARD_CLIENT_HEIGHT
+        or geometry["outer_width"] != outer_width
+        or geometry["outer_height"] != outer_height
+        or geometry["client_width"] != client_width
+        or geometry["client_height"] != client_height
     ]
     if invalid:
         raise RuntimeError(f"stream layout hard-rule validation failed: {invalid}")
     return {
         "ok": True,
-        "policy": "starcg_4k_stacked_1080p_pico_v1",
+        "policy": f"starcg_stacked_{client_width}x{client_height}_pico_v1",
+        "client_width": client_width,
+        "client_height": client_height,
+        "outer_width": outer_width,
+        "outer_height": outer_height,
         "refresh_inset_px": RENDER_REFRESH_INSET_PX,
         "slots_refreshed": len(after),
         "before": before,
@@ -728,7 +748,10 @@ class StreamPublisherController:
             return {
                 "ok": True,
                 "mode": "warm_publisher_cache",
+                "stream_mode": "legacy_warm_cache",
                 "encoder": self.encoder,
+                "whep_path": None,
+                "switch_generation": None,
                 "cache_size": self.cache_size,
                 "warm_slots": warm_slots,
                 "active_slot": self._active_slot if alive else None,
@@ -892,7 +915,9 @@ class Handler(BaseHTTPRequestHandler):
     input_token = ""
     input_controller: PicoStreamInputController | None = None
     input_relay: GuiTestPcInputRelay | None = None
-    publisher_controller: StreamPublisherController | None = None
+    publisher_controller: (
+        StreamPublisherController | NativeSingleStreamController | None
+    ) = None
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -918,11 +943,13 @@ class Handler(BaseHTTPRequestHandler):
             payload["input"] = self._input_status()
             payload["service"] = "oplink-pc-no-zego-slots-1-15"
             payload["all_sources_ready"] = all(item["ok"] for item in payload["sources"])
+            payload.update(self._stream_metadata())
             self._json(payload)
             return
         if path == "/api/v1/sources":
             payload = sources_payload(self.slots)
             payload["input"] = self._input_status()
+            payload.update(self._stream_metadata())
             self._json(payload)
             return
         if path == "/api/v1/active":
@@ -944,6 +971,30 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **self.publisher_controller.viewer_status()})
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _stream_metadata(self) -> dict[str, object]:
+        controller = self.publisher_controller
+        if controller is None:
+            return {
+                "stream_mode": "legacy_warm_cache",
+                "whep_path": None,
+                "active_slot": None,
+                "switch_generation": None,
+            }
+        status = controller.status()
+        stream_mode = status.get("stream_mode")
+        if not isinstance(stream_mode, str):
+            stream_mode = (
+                "native_single"
+                if status.get("mode") == "native_single_stream"
+                else "legacy_warm_cache"
+            )
+        return {
+            "stream_mode": stream_mode,
+            "whep_path": status.get("whep_path"),
+            "active_slot": status.get("active_slot"),
+            "switch_generation": status.get("switch_generation"),
+        }
 
     def _input_status(self) -> dict[str, object]:
         if self.input_relay is not None:
@@ -987,6 +1038,11 @@ class Handler(BaseHTTPRequestHandler):
                 if slot not in self.slots:
                     raise ValueError(f"slot must be one of {self.slots}")
                 self._json(self.publisher_controller.activate(slot))
+            except NativeSingleStreamError as exc:
+                self._json(
+                    {"ok": False, "error": str(exc)},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
             except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
                 self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
@@ -1006,7 +1062,12 @@ class Handler(BaseHTTPRequestHandler):
                 if any(slot not in self.slots for slot in slots):
                     raise ValueError(f"slots must be selected from {self.slots}")
                 self._json(self.publisher_controller.prewarm(slots))
-            except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
+            except (
+                ValueError,
+                json.JSONDecodeError,
+                StreamPublisherError,
+                NativeSingleStreamError,
+            ) as exc:
                 self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path == "/api/v1/viewer":
@@ -1024,7 +1085,12 @@ class Handler(BaseHTTPRequestHandler):
                 if slot is not None and slot not in self.slots:
                     raise ValueError(f"slot must be one of {self.slots}")
                 self._json(self.publisher_controller.viewer_update(state, slot))
-            except (ValueError, json.JSONDecodeError, StreamPublisherError) as exc:
+            except (
+                ValueError,
+                json.JSONDecodeError,
+                StreamPublisherError,
+                NativeSingleStreamError,
+            ) as exc:
                 self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
         if path != "/api/v1/input":
@@ -1060,11 +1126,20 @@ def main() -> int:
     parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
     parser.add_argument("--probe", type=int)
     parser.add_argument("--repair-stream-layout", action="store_true")
+    parser.add_argument("--client-width", type=int, default=HARD_CLIENT_WIDTH)
+    parser.add_argument("--client-height", type=int, default=HARD_CLIENT_HEIGHT)
     parser.add_argument("--pico-config")
     parser.add_argument("--input-token-file")
     parser.add_argument("--gui-input-url")
     parser.add_argument("--pico-health", action="store_true")
     parser.add_argument("--ffmpeg")
+    parser.add_argument(
+        "--publisher-mode",
+        choices=("legacy_warm_cache", "native_single"),
+        default="legacy_warm_cache",
+    )
+    parser.add_argument("--native-router")
+    parser.add_argument("--native-path", default="oplink_active")
     parser.add_argument("--encoder", choices=("nvenc", "mf", "x264"), default="x264")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
@@ -1074,9 +1149,16 @@ def main() -> int:
     parser.add_argument("--viewer-idle-timeout-seconds", type=float, default=15.0)
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
     args = parser.parse_args()
+    if args.publisher_mode == "native_single" and not args.ffmpeg:
+        parser.error("--publisher-mode native_single requires --ffmpeg")
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]
     if args.repair_stream_layout:
-        print(json.dumps(repair_stream_layout(slots), separators=(",", ":")))
+        print(
+            json.dumps(
+                repair_stream_layout(slots, args.client_width, args.client_height),
+                separators=(",", ":"),
+            )
+        )
         return 0
     if args.probe is not None:
         print(json.dumps(source_identity(args.probe), separators=(",", ":")))
@@ -1094,23 +1176,47 @@ def main() -> int:
         Handler.input_token = Path(args.input_token_file).read_text(encoding="utf-8").strip()
     publisher_controller = None
     if args.ffmpeg:
-        publisher_controller = StreamPublisherController(
-            ffmpeg=args.ffmpeg,
-            encoder=args.encoder,
-            width=args.width,
-            height=args.height,
-            fps=args.fps,
-            bitrate_kbps=args.bitrate_kbps,
-            mediamtx_api=args.mediamtx_api,
-            cache_size=args.publisher_cache_size,
-            viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
-        )
+        if args.publisher_mode == "native_single":
+            if not args.native_router:
+                parser.error(
+                    "--publisher-mode native_single requires --native-router"
+                )
+            publisher_controller = NativeSingleStreamController(
+                router_exe=args.native_router,
+                ffmpeg=args.ffmpeg,
+                encoder=args.encoder,
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                bitrate_kbps=args.bitrate_kbps,
+                mediamtx_api=args.mediamtx_api,
+                identity_provider=source_identity,
+                runtime_dir=RUNTIME,
+                path_name=args.native_path,
+                viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
+                state_path=RUNTIME / "native_single_publisher.json",
+            )
+        else:
+            publisher_controller = StreamPublisherController(
+                ffmpeg=args.ffmpeg,
+                encoder=args.encoder,
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                bitrate_kbps=args.bitrate_kbps,
+                mediamtx_api=args.mediamtx_api,
+                cache_size=args.publisher_cache_size,
+                viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
+            )
         Handler.publisher_controller = publisher_controller
         atexit.register(publisher_controller.stop)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Metadata service listening on http://{args.host}:{args.port}", flush=True)
     try:
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
     finally:
         server.server_close()
         if publisher_controller:

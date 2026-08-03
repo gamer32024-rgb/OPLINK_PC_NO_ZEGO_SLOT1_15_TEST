@@ -7,6 +7,15 @@ final class StreamViewController: UIViewController {
         static let inputToken = "oplink.streamTest.inputToken"
     }
 
+    private enum StreamMode: Equatable {
+        case legacyWarmCache
+        case nativeSingle
+
+        init(serverValue: String?) {
+            self = serverValue == "native_single" ? .nativeSingle : .legacyWarmCache
+        }
+    }
+
     private struct QueuedInput {
         let request: StreamInputRequest
     }
@@ -37,14 +46,19 @@ final class StreamViewController: UIViewController {
     private let guiAPI = GUIBridgeAPI()
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
     private var whepClients: [Int: WHEPClient] = [:]
+    private var singleWHEPClient: WHEPClient?
     private var activeWHEPSlot: Int?
     private var pendingWHEPSlot: Int?
     private var displayedSlot: Int?
     private var pendingRenderedSlot: Int?
     private var pendingRenderedGeneration: Int?
+    private var pendingNativeRenderedSlot: Int?
+    private var pendingNativeSwitchGeneration: Int?
+    private var nativeRouterPID: Int?
     private var desiredWarmSlots = Set<Int>()
     private var prewarmSequence = 0
 
+    private var streamMode = StreamMode.legacyWarmCache
     private var selectedSlot = 1
     private var connectionSequence = 0
     private var switchStartedAt: Date?
@@ -156,6 +170,7 @@ final class StreamViewController: UIViewController {
         keyboardFlushTask?.cancel()
         NotificationCenter.default.removeObserver(self)
         whepClients.values.forEach { $0.stop() }
+        singleWHEPClient?.stop()
     }
 
     private func buildLayout() {
@@ -583,7 +598,8 @@ final class StreamViewController: UIViewController {
     private func configureCallbacks() {
         frameMonitor.onFirstFrame = { [weak self] size, generation in
             guard let self else { return }
-            guard generation == self.pendingRenderedGeneration,
+            guard self.streamMode == .legacyWarmCache,
+                  generation == self.pendingRenderedGeneration,
                   let renderedSlot = self.pendingRenderedSlot,
                   self.activeWHEPSlot == renderedSlot else { return }
             self.displayedSlot = renderedSlot
@@ -602,6 +618,28 @@ final class StreamViewController: UIViewController {
             if self.viewerIsForeground, let baseURL = self.configuredBaseURL() {
                 self.prewarmAdjacentStreams(baseURL: baseURL, around: self.selectedSlot)
             }
+        }
+        frameMonitor.onFirstFrameForGeneration = { [weak self] size, generation in
+            guard let self,
+                  self.streamMode == .nativeSingle,
+                  generation == self.pendingNativeSwitchGeneration,
+                  let renderedSlot = self.pendingNativeRenderedSlot else { return }
+            self.displayedSlot = renderedSlot
+            self.pendingNativeRenderedSlot = nil
+            self.pendingNativeSwitchGeneration = nil
+            self.updateSlotWatermark()
+            self.renderedSize = size
+            if let switchStartedAt = self.switchStartedAt {
+                self.lastSwitchMilliseconds = Int(
+                    Date().timeIntervalSince(switchStartedAt) * 1000
+                )
+            }
+            self.switchStartedAt = nil
+            self.touchOverlay.isUserInteractionEnabled =
+                self.latestResponse?.input.enabled == true
+                && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
+            self.setStatus("Slot \(renderedSlot) 首幀完成", good: true)
+            self.updateMetrics()
         }
         frameMonitor.onSizeChanged = { [weak self] size in
             self?.renderedSize = size
@@ -784,7 +822,9 @@ final class StreamViewController: UIViewController {
         connectionSequence += 1
         prewarmSequence += 1
         sendViewerState("background", slot: selectedSlot, allowBackgroundExecution: true)
-        resetWHEPClients()
+        if streamMode == .legacyWarmCache {
+            resetWHEPClients()
+        }
         touchOverlay.isUserInteractionEnabled = false
     }
 
@@ -842,7 +882,8 @@ final class StreamViewController: UIViewController {
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
 
-        if desiredWarmSlots.contains(slot),
+        if streamMode == .legacyWarmCache,
+           desiredWarmSlots.contains(slot),
            let client = whepClients[slot],
            client.isReady,
            let response = latestResponse,
@@ -909,7 +950,17 @@ final class StreamViewController: UIViewController {
         slot: Int,
         sequence: Int
     ) {
+        latestResponse = response
+        applyStreamMode(response)
         updateSourceLabel(source: source, response: response)
+        if streamMode == .nativeSingle {
+            activateNativeSingle(
+                baseURL: baseURL,
+                slot: slot,
+                sequence: sequence
+            )
+            return
+        }
         setStatus("切換主機 publisher 至 Slot \(slot)", good: false)
         streamAPI.activate(baseURL: baseURL, slot: slot) { [weak self] result in
             DispatchQueue.main.async {
@@ -931,6 +982,115 @@ final class StreamViewController: UIViewController {
                     self.connectOrDisplayWHEP(baseURL: baseURL, slot: slot)
                 }
             }
+        }
+    }
+
+    private func applyStreamMode(_ response: StreamSourcesResponse) {
+        let resolvedMode = StreamMode(serverValue: response.streamMode)
+        guard resolvedMode != streamMode else { return }
+        resetWHEPClients()
+        streamMode = resolvedMode
+    }
+
+    private func activateNativeSingle(
+        baseURL: URL,
+        slot: Int,
+        sequence: Int
+    ) {
+        setStatus("切換原生單串流至 Slot \(slot)", good: false)
+        streamAPI.activate(baseURL: baseURL, slot: slot) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self,
+                      sequence == self.connectionSequence,
+                      self.selectedSlot == slot else { return }
+                switch result {
+                case .failure(let error):
+                    self.setStatus(error.localizedDescription, good: false)
+                case .success(let activation):
+                    guard activation.ok,
+                          activation.activeSlot == slot,
+                          (
+                              activation.streamMode == nil
+                              || activation.streamMode == "native_single"
+                          ),
+                          let switchGeneration = activation.switchGeneration,
+                          let routerPID = activation.routerPID,
+                          activation.encoderPID != nil else {
+                        self.setStatus("主機未確認 Slot \(slot) 原生首幀", good: false)
+                        return
+                    }
+                    if let previousRouterPID = self.nativeRouterPID,
+                       previousRouterPID != routerPID {
+                        _ = self.frameMonitor.reset()
+                    }
+                    self.nativeRouterPID = routerPID
+                    self.lastPublisherActivationMilliseconds = activation.activationMs
+                    self.updateMetrics()
+                    self.continueNativeWHEP(
+                        baseURL: baseURL,
+                        slot: slot,
+                        switchGeneration: switchGeneration
+                    )
+                }
+            }
+        }
+    }
+
+    private func nativeWHEPClient() -> WHEPClient {
+        if let singleWHEPClient { return singleWHEPClient }
+        let client = WHEPClient()
+        client.onReady = { [weak self, weak client] elapsedMs in
+            guard let self, let client,
+                  self.streamMode == .nativeSingle,
+                  self.singleWHEPClient === client else { return }
+            self.lastWHEPConnectMilliseconds = elapsedMs
+            self.updateMetrics()
+        }
+        client.onStateChanged = { [weak self, weak client] state in
+            guard let self, let client,
+                  self.streamMode == .nativeSingle,
+                  self.singleWHEPClient === client else { return }
+            self.setStatus(state, good: state == "ICE 已連線" || state == "解碼中")
+        }
+        client.onError = { [weak self, weak client] error in
+            guard let self, let client,
+                  self.singleWHEPClient === client else { return }
+            client.stop()
+            self.singleWHEPClient = nil
+            if self.streamMode == .nativeSingle {
+                self.setStatus(error.localizedDescription, good: false)
+            }
+        }
+        singleWHEPClient = client
+        return client
+    }
+
+    private func continueNativeWHEP(
+        baseURL: URL,
+        slot: Int,
+        switchGeneration: Int
+    ) {
+        guard frameMonitor.expectFirstFrame(for: switchGeneration) else {
+            setStatus("拒絕重複或倒退的 switch generation", good: false)
+            return
+        }
+        pendingNativeRenderedSlot = slot
+        pendingNativeSwitchGeneration = switchGeneration
+        pendingWHEPSlot = nil
+        desiredWarmSlots.removeAll()
+        prewarmSequence += 1
+
+        let client = nativeWHEPClient()
+        if client.isReady {
+            lastWHEPConnectMilliseconds = 0
+            client.setRenderer(frameMonitor)
+        } else if !client.isStarted {
+            client.connect(
+                endpoint: StreamEndpoint.nativeWhep(base: baseURL),
+                renderer: frameMonitor
+            )
+        } else {
+            client.setRenderer(frameMonitor)
         }
     }
 
@@ -1022,6 +1182,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func prewarmAdjacentStreams(baseURL: URL, around slot: Int) {
+        guard streamMode == .legacyWarmCache else { return }
         let previous = adjacentAvailableSlot(from: slot, step: -1)
         let next = adjacentAvailableSlot(from: slot, step: 1)
         var ordered = [slot]
@@ -1059,11 +1220,17 @@ final class StreamViewController: UIViewController {
     private func resetWHEPClients() {
         whepClients.values.forEach { $0.stop() }
         whepClients.removeAll()
+        singleWHEPClient?.stop()
+        singleWHEPClient = nil
         activeWHEPSlot = nil
         pendingWHEPSlot = nil
         displayedSlot = nil
         pendingRenderedSlot = nil
         pendingRenderedGeneration = nil
+        pendingNativeRenderedSlot = nil
+        pendingNativeSwitchGeneration = nil
+        nativeRouterPID = nil
+        _ = frameMonitor.reset()
         updateSlotWatermark()
         desiredWarmSlots.removeAll()
         prewarmSequence += 1

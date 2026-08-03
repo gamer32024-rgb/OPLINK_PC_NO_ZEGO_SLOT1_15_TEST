@@ -7,9 +7,12 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         let size: CGSize
         let totalFrames: Int
         let framesSinceLastRead: Int
+        let pendingGeneration: Int?
+        let lastRenderedGeneration: Int?
     }
 
     var onFirstFrame: ((CGSize, Int) -> Void)?
+    var onFirstFrameForGeneration: ((CGSize, Int) -> Void)?
     var onSizeChanged: ((CGSize) -> Void)?
 
     private let target: RTCVideoRenderer
@@ -19,6 +22,8 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
     private var previousReadFrames = 0
     private var hasRenderedFrame = false
     private var generation = 0
+    private var pendingGeneration: Int?
+    private var lastRenderedGeneration: Int?
 
     init(target: RTCVideoRenderer) {
         self.target = target
@@ -42,12 +47,35 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         hasRenderedFrame = true
         let currentSize = size
         let currentGeneration = generation
+        let renderedGeneration = pendingGeneration
+        if let renderedGeneration {
+            pendingGeneration = nil
+            lastRenderedGeneration = renderedGeneration
+        }
         lock.unlock()
         if isFirst {
             DispatchQueue.main.async { [weak self] in
                 self?.onFirstFrame?(currentSize, currentGeneration)
             }
         }
+        if let renderedGeneration {
+            DispatchQueue.main.async { [weak self] in
+                self?.onFirstFrameForGeneration?(currentSize, renderedGeneration)
+            }
+        }
+    }
+
+    @discardableResult
+    func expectFirstFrame(for generation: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation >= 0,
+              generation > (lastRenderedGeneration ?? -1),
+              generation > (pendingGeneration ?? -1) else {
+            return false
+        }
+        pendingGeneration = generation
+        return true
     }
 
     @discardableResult
@@ -58,6 +86,8 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         totalFrames = 0
         previousReadFrames = 0
         hasRenderedFrame = false
+        pendingGeneration = nil
+        lastRenderedGeneration = nil
         let currentGeneration = generation
         lock.unlock()
         return currentGeneration
@@ -68,6 +98,12 @@ final class VideoFrameMonitor: NSObject, RTCVideoRenderer {
         defer { lock.unlock() }
         let delta = totalFrames - previousReadFrames
         previousReadFrames = totalFrames
-        return Snapshot(size: size, totalFrames: totalFrames, framesSinceLastRead: delta)
+        return Snapshot(
+            size: size,
+            totalFrames: totalFrames,
+            framesSinceLastRead: delta,
+            pendingGeneration: pendingGeneration,
+            lastRenderedGeneration: lastRenderedGeneration
+        )
     }
 }
