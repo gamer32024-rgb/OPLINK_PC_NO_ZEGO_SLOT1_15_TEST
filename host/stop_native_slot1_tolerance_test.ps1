@@ -12,6 +12,7 @@ $StatePath = Join-Path $Runtime "state.json"
 $NativeStatePath = Join-Path $Runtime "native_single_publisher.json"
 $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 $ServerScript = [System.IO.Path]::GetFullPath((Join-Path $Root "stream_test_server.py"))
+$Python = $null
 
 function Stop-IdentifiedProcess {
     param([int]$Pid, [string]$ExpectedPath)
@@ -52,6 +53,24 @@ if ($state -and $state.pids.api) {
 if (Test-Path -LiteralPath $Tailscale -PathType Leaf) {
     & $Tailscale serve --https=$ServeHttpsPort --set-path=/oplink-test off | Out-Null
     & $Tailscale serve --https=$ServeHttpsPort --set-path=/oplink-whep off | Out-Null
+}
+$restore = $state.layout.before | Select-Object -First 1
+if ($restore -and $restore.client_width -and $restore.client_height) {
+    $Python = (Get-Command python -ErrorAction SilentlyContinue).Source
+    $fallback = "C:\Users\andyb\Documents\star_cros_bot\.venv\Scripts\python.exe"
+    foreach ($candidate in @($Python, $fallback)) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            $Python = $candidate
+            break
+        }
+    }
+    if ($Python) {
+        & $Python $ServerScript --slots 1 --repair-stream-layout `
+            --client-width ([int]$restore.client_width) --client-height ([int]$restore.client_height) | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Native test stopped, but Slot 1 geometry could not be restored automatically."
+        }
+    }
 }
 Remove-Item -LiteralPath $StatePath,$NativeStatePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $Runtime "input_token.txt") -Force -ErrorAction SilentlyContinue
