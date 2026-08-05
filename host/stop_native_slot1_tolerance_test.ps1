@@ -53,6 +53,7 @@ if ($state -and $state.pids.api) {
 if (Test-Path -LiteralPath $Tailscale -PathType Leaf) {
     & $Tailscale serve --https=$ServeHttpsPort --set-path=/oplink-test off | Out-Null
     & $Tailscale serve --https=$ServeHttpsPort --set-path=/oplink-whep off | Out-Null
+    & $Tailscale serve --https=$ServeHttpsPort --set-path=/gui-test-pc off | Out-Null
 }
 $restore = $state.layout.before | Select-Object -First 1
 if ($restore -and $restore.client_width -and $restore.client_height) {

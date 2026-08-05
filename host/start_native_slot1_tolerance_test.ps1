@@ -236,6 +236,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not configure the isolated native API Serve path." }
         & $Tailscale serve --bg "--https=$ServeHttpsPort" "--set-path=/oplink-whep" "http://127.0.0.1:8889"
         if ($LASTEXITCODE -ne 0) { throw "Could not configure the isolated native WHEP Serve path." }
+        & $Tailscale serve --bg "--https=$ServeHttpsPort" "--set-path=/gui-test-pc" "http://127.0.0.1:5100"
+        if ($LASTEXITCODE -ne 0) { throw "Could not configure the isolated GUI_TEST_PC Serve path." }
     }
 
     Write-Host "Native Slot 1 tolerance test is ready; legacy OPLINK_PC remains on 5110/443."
