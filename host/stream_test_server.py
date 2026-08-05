@@ -1148,7 +1148,15 @@ def main() -> int:
     parser.add_argument("--publisher-cache-size", type=int, default=3)
     parser.add_argument("--viewer-idle-timeout-seconds", type=float, default=15.0)
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
+    parser.add_argument(
+        "--runtime-dir",
+        help="Override runtime state/log directory for an isolated stream host",
+    )
     args = parser.parse_args()
+    global RUNTIME
+    if args.runtime_dir:
+        RUNTIME = Path(args.runtime_dir).resolve()
+        RUNTIME.mkdir(parents=True, exist_ok=True)
     if args.publisher_mode == "native_single" and not args.ffmpeg:
         parser.error("--publisher-mode native_single requires --ffmpeg")
     slots = [int(value.strip()) for value in args.slots.split(",") if value.strip()]

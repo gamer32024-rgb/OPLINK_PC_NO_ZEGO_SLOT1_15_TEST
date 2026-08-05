@@ -3,6 +3,10 @@ param(
     [int[]]$Slots = @(1..15),
     [ValidateSet("720p", "1080p")]
     [string]$Profile = "1080p",
+    [ValidateRange(256, 3840)]
+    [int]$OutputWidth,
+    [ValidateRange(144, 2160)]
+    [int]$OutputHeight,
     [ValidateRange(1, 60)]
     [int]$Fps = 30,
     [ValidateRange(250, 20000)]
@@ -257,11 +261,32 @@ $tailscaleDnsName = ([string]$tailscaleStatus.Self.DNSName).TrimEnd(".")
 if (!$tailscaleDnsName) { throw "Tailscale did not return this host's DNS name." }
 $networkUnderlay = Get-PhysicalUnderlayGate
 
-$profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
-$profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
+$customOutputWidth = $PSBoundParameters.ContainsKey("OutputWidth")
+$customOutputHeight = $PSBoundParameters.ContainsKey("OutputHeight")
+if ($customOutputWidth -ne $customOutputHeight) {
+    throw "OutputWidth and OutputHeight must be supplied together."
+}
+if ($customOutputWidth) {
+    $profileWidth = $OutputWidth
+    $profileHeight = $OutputHeight
+    if ([Math]::Abs(($profileWidth / $profileHeight) - (16 / 9)) -gt 0.001) {
+        throw "OutputWidth and OutputHeight must describe a 16:9 profile."
+    }
+} else {
+    $profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
+    $profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
+}
+$layoutSlots = if ($nativeProfileDefaults) { @($Slots) } else { @(1..15) }
+if (!$layoutSlots -or ($layoutSlots | Where-Object { $_ -lt 1 -or $_ -gt 15 })) {
+    throw "Layout slots must contain values from 1 through 15."
+}
+$layoutSlots = @($layoutSlots | Sort-Object -Unique)
+$slotArgument = ($Slots | Sort-Object -Unique) -join ","
+$layoutSlotArgument = $layoutSlots -join ","
 $layoutArguments = @("--repair-stream-layout")
 if ($StreamMode -eq "native_single") {
     $layoutArguments += @(
+        "--slots", $layoutSlotArgument,
         "--client-width", "$profileWidth",
         "--client-height", "$profileHeight"
     )
@@ -269,8 +294,8 @@ if ($StreamMode -eq "native_single") {
 $layoutRepairText = & $Python $ServerScript @layoutArguments
 if ($LASTEXITCODE -ne 0) { throw "Could not refresh and validate the 15 game render surfaces." }
 $layoutRepair = $layoutRepairText | ConvertFrom-Json
-if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne 15) {
-    throw "The $StreamMode stream layout preflight did not refresh all 15 slots."
+if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne $layoutSlots.Count) {
+    throw "The $StreamMode stream layout preflight did not refresh the requested slots."
 }
 $identities = @()
 foreach ($slot in $Slots) {
@@ -358,6 +383,7 @@ try {
 
     $apiArguments = @(
         $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort",
+        "--slots", $slotArgument,
         "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
         "--publisher-mode", $StreamMode,
         "--width", "$profileWidth", "--height", "$profileHeight",
@@ -470,14 +496,14 @@ try {
         throw "The $StreamMode publisher did not activate slot 1."
     }
 
-    Write-Host "OPLINK_PC slots 1-15 no-ZEGO test is ready."
+    Write-Host "OPLINK_PC slots $slotArgument no-ZEGO test is ready."
     if ($StreamMode -eq "native_single") {
         Write-Host "Publisher: native single path oplink_active | router=$($activation.router_pid) encoder=$($activation.encoder_pid) | active slot 1 | activation=$($activation.activation_ms)ms"
     } else {
         Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
     }
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
-    Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/15 refreshed at $($layoutRepair.client_width)x$($layoutRepair.client_height) client"
+    Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/$($layoutSlots.Count) refreshed at $($layoutRepair.client_width)x$($layoutRepair.client_height) client"
     foreach ($identity in $identities) {
         Write-Host ("Slot {0}: HWND={1} logical={2}x{3} WGC expected={4}x{5} aspect={6:N5}" -f `
             $identity.slot, $identity.hwnd, $identity.client_logical.w, $identity.client_logical.h, `
@@ -491,7 +517,7 @@ try {
     if ($StreamMode -eq "native_single") {
         Write-Host "WHEP native single: https://$tailscaleDnsName/oplink-whep/oplink_active/whep"
     } else {
-        Write-Host "WHEP slots 1-15: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
+        Write-Host "WHEP slots $slotArgument`: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
     }
 } catch {
     Stop-StartedProcesses
