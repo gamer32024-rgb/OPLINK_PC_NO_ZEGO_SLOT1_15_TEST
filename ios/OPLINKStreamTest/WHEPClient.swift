@@ -196,9 +196,12 @@ final class WHEPClient: NSObject {
                 return
             }
             guard (200..<300).contains(http.statusCode) else {
-                let reason = data
-                    .flatMap { String(data: $0, encoding: .utf8) }
-                    .map(Self.compactServerMessage)
+                let reason: String?
+                if let data, let message = String(data: data, encoding: .utf8) {
+                    reason = Self.compactServerMessage(message)
+                } else {
+                    reason = nil
+                }
                 self.fail(WHEPError.serverRejected(status: http.statusCode, reason: reason))
                 return
             }
