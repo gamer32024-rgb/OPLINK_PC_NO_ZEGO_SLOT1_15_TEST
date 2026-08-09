@@ -148,23 +148,26 @@ final class WHEPClient: NSObject {
     }
 
     private func waitForICE(peer: RTCPeerConnection, generation: Int, completion: @escaping () -> Void) {
-        if peer.iceGatheringState == .complete {
-            completion()
-            return
-        }
-        // WHEP needs the complete non-trickle offer so Tailscale candidates are included.
-        var completed = false
-        iceReady = { [weak self] in
-            guard let self, generation == self.connectionGeneration, !completed else { return }
-            completed = true
-            self.iceReady = nil
-            completion()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            guard let self, generation == self.connectionGeneration, !completed else { return }
-            completed = true
-            self.iceReady = nil
-            completion()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, generation == self.connectionGeneration else { return }
+            if peer.iceGatheringState == .complete {
+                completion()
+                return
+            }
+            // Serialize the ICE callback and timeout so the WHEP offer is posted exactly once.
+            var completed = false
+            self.iceReady = { [weak self] in
+                guard let self, generation == self.connectionGeneration, !completed else { return }
+                completed = true
+                self.iceReady = nil
+                completion()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                guard let self, generation == self.connectionGeneration, !completed else { return }
+                completed = true
+                self.iceReady = nil
+                completion()
+            }
         }
     }
 
@@ -173,19 +176,33 @@ final class WHEPClient: NSObject {
             fail(WHEPError.missingOffer)
             return
         }
+        guard let offerSDP = Self.normalizedOfferSDP(localDescription.sdp),
+              let offerData = offerSDP.data(using: .utf8) else {
+            fail(WHEPError.invalidOffer)
+            return
+        }
         emitState("送出 WHEP offer")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.setValue("application/sdp", forHTTPHeaderField: "Accept")
-        request.httpBody = localDescription.sdp.data(using: .utf8)
+        request.httpBody = offerData
         request.timeoutInterval = 8
         session.dataTask(with: request) { [weak self] data, response, error in
             guard let self, generation == self.connectionGeneration else { return }
             if let error { self.fail(error); return }
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode),
-                  let data,
+            guard let http = response as? HTTPURLResponse else {
+                self.fail(WHEPError.invalidAnswer)
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let reason = data
+                    .flatMap { String(data: $0, encoding: .utf8) }
+                    .map(Self.compactServerMessage)
+                self.fail(WHEPError.serverRejected(status: http.statusCode, reason: reason))
+                return
+            }
+            guard let data,
                   let answerText = String(data: data, encoding: .utf8) else {
                 self.fail(WHEPError.invalidAnswer)
                 return
@@ -201,6 +218,25 @@ final class WHEPClient: NSObject {
                 self.attachFirstVideoReceiver(from: peer, generation: generation, retries: 20)
             }
         }.resume()
+    }
+
+    private static func normalizedOfferSDP(_ value: String) -> String? {
+        let lines = value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard lines.first == "v=0",
+              lines.contains(where: { $0.hasPrefix("m=video ") }) else { return nil }
+        return lines.joined(separator: "\r\n") + "\r\n"
+    }
+
+    private static func compactServerMessage(_ value: String) -> String? {
+        let message = value
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !message.isEmpty else { return nil }
+        return String(message.prefix(180))
     }
 
     private func attachFirstVideoReceiver(from peer: RTCPeerConnection, generation: Int, retries: Int) {
@@ -276,7 +312,12 @@ extension WHEPClient: RTCPeerConnectionDelegate {
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
         guard self.peerConnection === peerConnection else { return }
-        if newState == .complete { iceReady?() }
+        if newState == .complete {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.peerConnection === peerConnection else { return }
+                self.iceReady?()
+            }
+        }
     }
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {}
@@ -291,7 +332,9 @@ extension WHEPClient: RTCPeerConnectionDelegate {
 enum WHEPError: LocalizedError {
     case cannotCreatePeer
     case missingOffer
+    case invalidOffer
     case invalidAnswer
+    case serverRejected(status: Int, reason: String?)
     case missingVideoTrack
     case iceFailed
     case iceClosed
@@ -300,7 +343,11 @@ enum WHEPError: LocalizedError {
         switch self {
         case .cannotCreatePeer: return "無法建立 WebRTC peer。"
         case .missingOffer: return "WebRTC 沒有產生 offer。"
+        case .invalidOffer: return "WebRTC 產生的 WHEP offer 格式無效。"
         case .invalidAnswer: return "MediaMTX WHEP answer 無效。"
+        case .serverRejected(let status, let reason):
+            return reason.map { "MediaMTX 拒絕 WHEP (HTTP \(status))：\($0)" }
+                ?? "MediaMTX 拒絕 WHEP (HTTP \(status))。"
         case .missingVideoTrack: return "WHEP 已連線，但沒有收到 video track。"
         case .iceFailed: return "WebRTC ICE 連線失敗，請確認 iPhone Tailscale 已連線。"
         case .iceClosed: return "WebRTC ICE session 已關閉。"

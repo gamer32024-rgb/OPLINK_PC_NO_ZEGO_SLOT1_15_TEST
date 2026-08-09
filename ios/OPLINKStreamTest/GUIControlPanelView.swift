@@ -29,6 +29,7 @@ final class GUIControlPanelView: UIView {
     private var slotPlaybackStatus: [String: String] = [:]
     private var moduleNames: [String] = []
     private var moduleGroups: [GUIModuleGroup] = []
+    private var moduleGroupSignature: [String]?
     private var moduleChain: [String?] = Array(repeating: nil, count: 10)
     private var presets: [GUIModuleChainPreset] = []
     private var activeChainIndex = 0
@@ -81,14 +82,21 @@ final class GUIControlPanelView: UIView {
         if orderedGroups.isEmpty, !modules.isEmpty {
             orderedGroups = [GUIModuleGroup(name: "未分組", modules: modules.keys.sortedLocalized())]
         }
+        let nextSignature = orderedGroups.map { group in
+            group.name + "\u{001D}" + group.modules.joined(separator: "\u{001E}")
+        }
+        let groupsChanged = nextSignature != moduleGroupSignature
         moduleGroups = orderedGroups
         moduleNames = orderedGroups.flatMap(\.modules)
+        moduleGroupSignature = nextSignature
         moduleChain = moduleChain.map { name in
             guard let name, available.contains(name) else { return nil }
             return name
         }
 
-        rebuildModuleButtons()
+        if groupsChanged {
+            rebuildModuleButtons()
+        }
         refreshSlotButtons()
         refreshChainButtons()
         refreshPresetButtons()
@@ -113,42 +121,38 @@ final class GUIControlPanelView: UIView {
         backgroundColor = .clear
 
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor.black.withAlphaComponent(0.50)
+        card.backgroundColor = UIColor.black.withAlphaComponent(0.38)
         card.layer.cornerRadius = 18
         card.layer.borderWidth = 1
         card.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
         addSubview(card)
 
-        let close = iconButton("xmark", label: "關閉控制面板", size: 18)
-        close.transform = CGAffineTransform(translationX: 8, y: -4)
+        let close = iconButton("xmark", label: "關閉控制面板", size: 32, symbolPointSize: 14)
         close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
 
         let slotsColumn = buildSlotsColumn()
         let modulesColumn = buildModulesColumn(closeButton: close)
         let body = UIStackView(arrangedSubviews: [slotsColumn, modulesColumn])
         body.axis = .horizontal
-        body.spacing = 12
+        body.spacing = 10
         body.distribution = .fill
-        slotsColumn.widthAnchor.constraint(equalTo: body.widthAnchor, multiplier: 0.39).isActive = true
+        slotsColumn.widthAnchor.constraint(equalTo: body.widthAnchor, multiplier: 0.35).isActive = true
 
         let mainStack = UIStackView(arrangedSubviews: [body])
         mainStack.axis = .vertical
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mainStack)
 
-        let preferredWidth = card.widthAnchor.constraint(equalToConstant: 760)
-        preferredWidth.priority = .defaultHigh
         let preferredHeight = card.heightAnchor.constraint(equalToConstant: 382)
         preferredHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
             card.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
             card.centerYAnchor.constraint(equalTo: safeAreaLayoutGuide.centerYAnchor),
-            preferredWidth,
+            card.widthAnchor.constraint(equalTo: safeAreaLayoutGuide.widthAnchor, multiplier: 0.97),
             preferredHeight,
-            card.widthAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.widthAnchor, multiplier: 0.94),
             card.heightAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.heightAnchor, multiplier: 0.95),
-            mainStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            mainStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            mainStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            mainStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
             mainStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             mainStack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
         ])
@@ -409,10 +413,10 @@ final class GUIControlPanelView: UIView {
 
         populateModuleGroups(
             in: quickModuleGroupsStack,
-            columns: 10,
+            columns: 8,
             buttonHeight: 28,
             fontSize: 10,
-            fixedButtonWidth: 38,
+            fixedButtonWidth: 44,
             singleLine: true
         )
         populateModuleGroups(
@@ -472,6 +476,9 @@ final class GUIControlPanelView: UIView {
                     } else if fixedButtonWidth == nil {
                         row.addArrangedSubview(UIView())
                     }
+                }
+                if fixedButtonWidth != nil {
+                    row.addArrangedSubview(UIView())
                 }
                 grid.addArrangedSubview(row)
             }
@@ -567,9 +574,23 @@ final class GUIControlPanelView: UIView {
         }
     }
 
-    private func iconButton(_ systemName: String, label: String, size: CGFloat = 30) -> UIButton {
+    private func iconButton(
+        _ systemName: String,
+        label: String,
+        size: CGFloat = 30,
+        symbolPointSize: CGFloat? = nil
+    ) -> UIButton {
         let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: systemName), for: .normal)
+        let image: UIImage?
+        if let symbolPointSize {
+            image = UIImage(
+                systemName: systemName,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: symbolPointSize, weight: .semibold)
+            )
+        } else {
+            image = UIImage(systemName: systemName)
+        }
+        button.setImage(image, for: .normal)
         button.tintColor = .white
         button.backgroundColor = UIColor.white.withAlphaComponent(0.25)
         button.layer.cornerRadius = size / 2
