@@ -21,6 +21,7 @@ from native_single_stream_controller import (
     NativeSingleStreamController,
     NativeSingleStreamError,
 )
+from overview_stream_controller import OverviewStreamController, OverviewStreamError
 from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 
 
@@ -33,10 +34,10 @@ SLOT_PID_MAP_PATH = Path(
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 HARD_WINDOW_X = 0
 HARD_WINDOW_Y = 0
-HARD_OUTER_WIDTH = 1942
-HARD_OUTER_HEIGHT = 1136
-HARD_CLIENT_WIDTH = 1920
-HARD_CLIENT_HEIGHT = 1080
+HARD_OUTER_WIDTH = 1302
+HARD_OUTER_HEIGHT = 776
+HARD_CLIENT_WIDTH = 1280
+HARD_CLIENT_HEIGHT = 720
 WINDOW_FRAME_WIDTH = HARD_OUTER_WIDTH - HARD_CLIENT_WIDTH
 WINDOW_FRAME_HEIGHT = HARD_OUTER_HEIGHT - HARD_CLIENT_HEIGHT
 RENDER_REFRESH_INSET_PX = 8
@@ -370,7 +371,7 @@ def sources_payload(slots: list[int]) -> dict[str, object]:
         "generated_at_ms": int(time.time() * 1000),
         "profile": state.get(
             "profile",
-            {"encoded": {"w": 1920, "h": 1080}, "fps": 30, "bitrate_kbps": 6000},
+            {"encoded": {"w": 1280, "h": 720}, "fps": 30, "bitrate_kbps": 2200},
         ),
         "encoder": state.get("encoder", "unknown"),
         "network_underlay": state.get("network_underlay", {}),
@@ -918,6 +919,7 @@ class Handler(BaseHTTPRequestHandler):
     publisher_controller: (
         StreamPublisherController | NativeSingleStreamController | None
     ) = None
+    overview_controller: OverviewStreamController | None = None
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -939,7 +941,7 @@ class Handler(BaseHTTPRequestHandler):
             path = path.removeprefix("/oplink-test")
 
         if path in ("/", "/api/v1/health"):
-            payload = sources_payload(self.slots)
+            payload = self._sources_payload()
             payload["input"] = self._input_status()
             payload["service"] = "oplink-pc-no-zego-slots-1-15"
             payload["all_sources_ready"] = all(item["ok"] for item in payload["sources"])
@@ -947,7 +949,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(payload)
             return
         if path == "/api/v1/sources":
-            payload = sources_payload(self.slots)
+            payload = self._sources_payload()
             payload["input"] = self._input_status()
             payload.update(self._stream_metadata())
             self._json(payload)
@@ -971,6 +973,39 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **self.publisher_controller.viewer_status()})
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _sources_payload(self) -> dict[str, object]:
+        payload = sources_payload(self.slots)
+        if self.overview_controller is None:
+            return payload
+        sources = payload.get("sources")
+        if not isinstance(sources, list):
+            return payload
+        by_slot = {
+            int(item.get("slot") or 0): item
+            for item in sources
+            if isinstance(item, dict)
+        }
+        overview_ready = all(
+            by_slot.get(slot, {}).get("ok") is True for slot in range(1, 16)
+        )
+        sources.append(
+            {
+                "ok": overview_ready,
+                "slot": 16,
+                "title": "15-SLOT OVERVIEW",
+                "client_logical": {"w": HARD_CLIENT_WIDTH, "h": HARD_CLIENT_HEIGHT},
+                "capture_physical_expected": {
+                    "w": HARD_CLIENT_WIDTH,
+                    "h": HARD_CLIENT_HEIGHT,
+                },
+                "aspect": 16 / 9,
+                "aspect_is_16_9": True,
+                "read_only": True,
+                "error": None if overview_ready else "All 15 game windows are required for overview",
+            }
+        )
+        return payload
 
     def _stream_metadata(self) -> dict[str, object]:
         controller = self.publisher_controller
@@ -1035,9 +1070,22 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json_body()
                 slot = int(payload.get("slot") or 0)
-                if slot not in self.slots:
-                    raise ValueError(f"slot must be one of {self.slots}")
-                self._json(self.publisher_controller.activate(slot))
+                allowed_slots = [*self.slots, 16] if self.overview_controller else self.slots
+                if slot not in allowed_slots:
+                    raise ValueError(f"slot must be one of {allowed_slots}")
+                if slot == 16:
+                    if self.overview_controller is None:
+                        raise ValueError("overview stream is disabled")
+                    self._json(self.overview_controller.activate())
+                else:
+                    if self.overview_controller is not None:
+                        self.overview_controller.stop()
+                    self._json(self.publisher_controller.activate(slot))
+            except OverviewStreamError as exc:
+                self._json(
+                    {"ok": False, "error": str(exc)},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
             except NativeSingleStreamError as exc:
                 self._json(
                     {"ok": False, "error": str(exc)},
@@ -1082,8 +1130,11 @@ class Handler(BaseHTTPRequestHandler):
                 state = str(payload.get("state") or "").strip().lower()
                 raw_slot = payload.get("slot")
                 slot = int(raw_slot) if raw_slot is not None else None
-                if slot is not None and slot not in self.slots:
-                    raise ValueError(f"slot must be one of {self.slots}")
+                allowed_slots = [*self.slots, 16] if self.overview_controller else self.slots
+                if slot is not None and slot not in allowed_slots:
+                    raise ValueError(f"slot must be one of {allowed_slots}")
+                if self.overview_controller is not None:
+                    self.overview_controller.viewer_update(state, slot)
                 self._json(self.publisher_controller.viewer_update(state, slot))
             except (
                 ValueError,
@@ -1120,7 +1171,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 stream metadata service")
+    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 plus overview stream service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5110)
     parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
@@ -1140,11 +1191,15 @@ def main() -> int:
     )
     parser.add_argument("--native-router")
     parser.add_argument("--native-path", default="oplink_active")
+    parser.add_argument("--overview-path", default="oplink_overview")
+    parser.add_argument("--overview-fps", type=int, default=10)
+    parser.add_argument("--overview-bitrate-kbps", type=int, default=1800)
+    parser.add_argument("--disable-overview", action="store_true")
     parser.add_argument("--encoder", choices=("nvenc", "mf", "x264"), default="x264")
-    parser.add_argument("--width", type=int, default=1920)
-    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--bitrate-kbps", type=int, default=6000)
+    parser.add_argument("--bitrate-kbps", type=int, default=2200)
     parser.add_argument("--publisher-cache-size", type=int, default=3)
     parser.add_argument("--viewer-idle-timeout-seconds", type=float, default=15.0)
     parser.add_argument("--mediamtx-api", default="http://127.0.0.1:9997")
@@ -1183,6 +1238,7 @@ def main() -> int:
     if args.input_token_file:
         Handler.input_token = Path(args.input_token_file).read_text(encoding="utf-8").strip()
     publisher_controller = None
+    overview_controller = None
     if args.ffmpeg:
         if args.publisher_mode == "native_single":
             if not args.native_router:
@@ -1204,6 +1260,19 @@ def main() -> int:
                 viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
                 state_path=RUNTIME / "native_single_publisher.json",
             )
+            if not args.disable_overview:
+                overview_controller = OverviewStreamController(
+                    ffmpeg=args.ffmpeg,
+                    encoder=args.encoder,
+                    width=args.width,
+                    height=args.height,
+                    fps=args.overview_fps,
+                    bitrate_kbps=args.overview_bitrate_kbps,
+                    mediamtx_api=args.mediamtx_api,
+                    identity_provider=source_identity,
+                    runtime_dir=RUNTIME,
+                    path_name=args.overview_path,
+                )
         else:
             publisher_controller = StreamPublisherController(
                 ffmpeg=args.ffmpeg,
@@ -1217,7 +1286,10 @@ def main() -> int:
                 viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
             )
         Handler.publisher_controller = publisher_controller
+        Handler.overview_controller = overview_controller
         atexit.register(publisher_controller.stop)
+        if overview_controller:
+            atexit.register(overview_controller.close)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Metadata service listening on http://{args.host}:{args.port}", flush=True)
     try:
@@ -1229,6 +1301,8 @@ def main() -> int:
         server.server_close()
         if publisher_controller:
             publisher_controller.stop()
+        if overview_controller:
+            overview_controller.close()
     return 0
 
 

@@ -32,9 +32,9 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         previousButton.isHidden = !expanded
         listButton.isHidden = !expanded
         nextButton.isHidden = !expanded
-        widthConstraint.constant = expanded ? 42 : 38
-        heightConstraint.constant = expanded ? 82 : 38
-        layer.cornerRadius = expanded ? 21 : 19
+        widthConstraint.constant = expanded ? 44 : 38
+        heightConstraint.constant = expanded ? 112 : 38
+        layer.cornerRadius = expanded ? 22 : 19
         onExpandedChanged?(expanded)
 
         let updates: () -> Void = {
@@ -84,9 +84,9 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         heightConstraint = heightAnchor.constraint(equalToConstant: 38)
         let buttonHeights = [
             toggleButton.heightAnchor.constraint(equalToConstant: 38),
-            previousButton.heightAnchor.constraint(equalToConstant: 21),
+            previousButton.heightAnchor.constraint(equalToConstant: 36),
             listButton.heightAnchor.constraint(equalToConstant: 40),
-            nextButton.heightAnchor.constraint(equalToConstant: 21)
+            nextButton.heightAnchor.constraint(equalToConstant: 36)
         ]
         buttonHeights.forEach { $0.priority = .defaultHigh }
         NSLayoutConstraint.activate([

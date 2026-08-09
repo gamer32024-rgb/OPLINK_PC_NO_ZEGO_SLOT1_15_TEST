@@ -6,7 +6,7 @@ param(
     [ValidateRange(1, 60)]
     [int]$Fps = 30,
     [ValidateRange(250, 20000)]
-    [int]$BitrateKbps = 2500,
+    [int]$BitrateKbps = 2200,
     [ValidateSet("auto", "nvenc", "mf", "x264")]
     [string]$Encoder = "mf",
     [ValidateRange(1024, 65535)]
@@ -28,7 +28,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSCommandPath
 $Runtime = Join-Path $Root "runtime\native_slot1_tolerance"
 $StatePath = Join-Path $Runtime "state.json"
-$ServerScript = Join-Path $Root "stream_test_server.py"
+$ServerScript = [System.IO.Path]::GetFullPath((Join-Path $Root "stream_test_server.py"))
 $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 $MediamtxApi = "http://127.0.0.1:9997"
 $LegacyApi = "http://127.0.0.1:5110"
@@ -86,6 +86,25 @@ function Stop-IdentifiedProcess {
     }
 }
 
+function Stop-StagingApiProcesses {
+    $portPattern = "(?i)(?:^|\s)--port\s+$ApiPort(?:\s|$)"
+    $apiProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $commandLine = [string]$_.CommandLine
+        $executable = [string]$_.ExecutablePath
+        $executable -match '(?i)python(?:w)?\.exe$' -and
+        $commandLine.IndexOf($ServerScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $commandLine.IndexOf($Runtime, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $commandLine -match $portPattern
+    })
+    $parentIds = @($apiProcesses | ForEach-Object { [int]$_.ParentProcessId })
+    $ordered = @($apiProcesses | Sort-Object @{ Expression = {
+        if ($parentIds -contains [int]$_.ProcessId) { 1 } else { 0 }
+    }})
+    foreach ($process in $ordered) {
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Stop-NativeStack {
     if (Test-Path -LiteralPath (Join-Path $Runtime "native_single_publisher.json")) {
         try {
@@ -95,16 +114,14 @@ function Stop-NativeStack {
         } catch {
         }
     }
-    if ($apiProcess -and !$apiProcess.HasExited) {
-        Stop-IdentifiedProcess $apiProcess.Id ((Resolve-Path $PythonPath -ErrorAction SilentlyContinue).Path)
-    }
-    if (Test-Path -LiteralPath $StatePath) {
+    if (Test-Path -LiteralPath (Join-Path $Runtime "overview_publisher.json")) {
         try {
-            $state = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-            Stop-IdentifiedProcess ([int]$state.pids.api) $Python
+            $overviewState = Get-Content -LiteralPath (Join-Path $Runtime "overview_publisher.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+            Stop-IdentifiedProcess ([int]$overviewState.publisher_pid) ([string]$overviewState.publisher_executable)
         } catch {
         }
     }
+    Stop-StagingApiProcesses
     Remove-Item -LiteralPath $StatePath -Force -ErrorAction SilentlyContinue
 }
 
@@ -132,7 +149,7 @@ if (!$FFmpeg) { throw "FFmpeg was not found. Pass -FFmpegPath." }
 if (!$NativeRouter) { throw "Native router was not found. Build it first or pass -NativeRouterPath." }
 
 if ($Restart -and (Test-Path -LiteralPath $StatePath)) {
-    & (Join-Path $Root "stop_native_slot1_tolerance_test.ps1") -IgnoreMissing -ServeHttpsPort $ServeHttpsPort
+    & (Join-Path $Root "stop_native_slot1_tolerance_test.ps1") -IgnoreMissing -ApiPort $ApiPort -ServeHttpsPort $ServeHttpsPort
 }
 if (Test-Path -LiteralPath $StatePath) {
     throw "A native Slot 1 tolerance test is already running. Use -Restart or stop_native_slot1_tolerance_test.ps1."
@@ -195,11 +212,12 @@ $state = [ordered]@{
 
 try {
     $apiArguments = @(
-        $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort", "--slots", "1",
+        $ServerScript, "--host", "127.0.0.1", "--port", "$ApiPort", "--slots", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
         "--ffmpeg", $FFmpeg, "--encoder", $selectedEncoder,
         "--publisher-mode", "native_single", "--native-router", $NativeRouter,
         "--native-path", "oplink_active", "--width", "$OutputWidth", "--height", "$OutputHeight",
         "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps",
+        "--overview-path", "oplink_overview", "--overview-fps", "10", "--overview-bitrate-kbps", "1800",
         "--publisher-cache-size", "1", "--viewer-idle-timeout-seconds", "15",
         "--mediamtx-api", $MediamtxApi, "--runtime-dir", $Runtime
     )

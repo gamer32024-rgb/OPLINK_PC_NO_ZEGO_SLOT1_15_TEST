@@ -45,7 +45,7 @@ if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("Profile")) {
     $Profile = "720p"
 }
 if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("BitrateKbps")) {
-    $BitrateKbps = 2500
+    $BitrateKbps = 2200
 }
 $Runtime = Join-Path $Root "runtime"
 $StatePath = Join-Path $Runtime "state.json"

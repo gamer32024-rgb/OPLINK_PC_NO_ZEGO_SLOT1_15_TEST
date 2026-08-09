@@ -315,6 +315,10 @@ enum StreamEndpoint {
         replacingPath(base, with: "/oplink-whep/oplink_active/whep")
     }
 
+    static func overviewWhep(base: URL) -> URL {
+        replacingPath(base, with: "/oplink-whep/oplink_overview/whep")
+    }
+
     static func replacingPath(_ base: URL, with path: String) -> URL {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = path

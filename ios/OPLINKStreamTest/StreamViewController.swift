@@ -10,9 +10,14 @@ final class StreamViewController: UIViewController {
     private enum StreamMode: Equatable {
         case legacyWarmCache
         case nativeSingle
+        case overview
 
         init(serverValue: String?) {
-            self = serverValue == "native_single" ? .nativeSingle : .legacyWarmCache
+            switch serverValue {
+            case "native_single": self = .nativeSingle
+            case "overview": self = .overview
+            default: self = .legacyWarmCache
+            }
         }
     }
 
@@ -195,7 +200,7 @@ final class StreamViewController: UIViewController {
 
         slotWatermarkLabel.translatesAutoresizingMaskIntoConstraints = false
         slotWatermarkLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
-        slotWatermarkLabel.textColor = UIColor(red: 0.35, green: 1, blue: 0.2, alpha: 0.92)
+        slotWatermarkLabel.textColor = UIColor(red: 0.315, green: 0.9, blue: 0.18, alpha: 0.92)
         slotWatermarkLabel.textAlignment = .center
         slotWatermarkLabel.isUserInteractionEnabled = false
         slotWatermarkLabel.isHidden = true
@@ -207,7 +212,7 @@ final class StreamViewController: UIViewController {
         view.addSubview(slotWatermarkLabel)
         NSLayoutConstraint.activate([
             slotWatermarkLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            slotWatermarkLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            slotWatermarkLabel.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             slotWatermarkLabel.widthAnchor.constraint(equalToConstant: 28),
             slotWatermarkLabel.heightAnchor.constraint(equalToConstant: 22)
         ])
@@ -568,7 +573,7 @@ final class StreamViewController: UIViewController {
         metricsLabel.numberOfLines = 2
         targetLabel.font = .systemFont(ofSize: 10, weight: .bold)
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
-        targetLabel.text = "TARGET 1080P / 30 FPS / SWITCH < 1000 MS / INPUT RTT < 300 MS"
+        targetLabel.text = "TARGET 1280x720 / 30 FPS / 2200 KBPS / SWITCH < 1000 MS"
 
         let stack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
         stack.axis = .vertical
@@ -598,7 +603,7 @@ final class StreamViewController: UIViewController {
     private func configureCallbacks() {
         frameMonitor.onFirstFrame = { [weak self] size, generation in
             guard let self else { return }
-            guard self.streamMode == .legacyWarmCache,
+            guard self.streamMode == .legacyWarmCache || self.streamMode == .overview,
                   generation == self.pendingRenderedGeneration,
                   let renderedSlot = self.pendingRenderedSlot,
                   self.activeWHEPSlot == renderedSlot else { return }
@@ -611,7 +616,8 @@ final class StreamViewController: UIViewController {
                 self.lastSwitchMilliseconds = Int(Date().timeIntervalSince(switchStartedAt) * 1000)
             }
             self.switchStartedAt = nil
-            self.touchOverlay.isUserInteractionEnabled = self.latestResponse?.input.enabled == true
+            self.touchOverlay.isUserInteractionEnabled = self.streamMode != .overview
+                && self.latestResponse?.input.enabled == true
                 && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
@@ -822,7 +828,7 @@ final class StreamViewController: UIViewController {
         connectionSequence += 1
         prewarmSequence += 1
         sendViewerState("background", slot: selectedSlot, allowBackgroundExecution: true)
-        if streamMode == .legacyWarmCache {
+        if streamMode == .legacyWarmCache || streamMode == .overview {
             resetWHEPClients()
         }
         touchOverlay.isUserInteractionEnabled = false
@@ -857,7 +863,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func connect(slot: Int) {
-        guard (1...15).contains(slot) else { return }
+        guard (1...16).contains(slot) else { return }
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
@@ -881,6 +887,11 @@ final class StreamViewController: UIViewController {
         refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
+
+        if slot == 16 {
+            activateOverview(baseURL: baseURL, sequence: sequence)
+            return
+        }
 
         if streamMode == .legacyWarmCache,
            desiredWarmSlots.contains(slot),
@@ -1036,6 +1047,44 @@ final class StreamViewController: UIViewController {
         }
     }
 
+    private func activateOverview(baseURL: URL, sequence: Int) {
+        if streamMode != .overview {
+            resetWHEPClients()
+            streamMode = .overview
+        }
+        touchOverlay.isUserInteractionEnabled = false
+        setStatus("正在啟動 15-Slot 全局畫面", good: false)
+        streamAPI.activate(baseURL: baseURL, slot: 16) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self,
+                      sequence == self.connectionSequence,
+                      self.selectedSlot == 16 else { return }
+                switch result {
+                case .failure(let error):
+                    self.setStatus(error.localizedDescription, good: false)
+                case .success(let activation):
+                    guard activation.ok,
+                          activation.publisherAlive,
+                          activation.activeSlot == 16,
+                          activation.streamMode == "overview" else {
+                        self.setStatus("主機未能啟動 Slot 16 全局畫面", good: false)
+                        return
+                    }
+                    self.lastPublisherActivationMilliseconds = activation.activationMs
+                    self.pendingWHEPSlot = 16
+                    self.updateMetrics()
+                    let client = self.whepClient(baseURL: baseURL, slot: 16)
+                    if client.isReady {
+                        self.lastWHEPConnectMilliseconds = 0
+                        self.displayWHEP(slot: 16)
+                    } else if !client.isStarted {
+                        client.connect(endpoint: StreamEndpoint.overviewWhep(base: baseURL))
+                    }
+                }
+            }
+        }
+    }
+
     private func nativeWHEPClient() -> WHEPClient {
         if let singleWHEPClient { return singleWHEPClient }
         let client = WHEPClient()
@@ -1173,12 +1222,13 @@ final class StreamViewController: UIViewController {
     }
 
     private func adjacentAvailableSlot(from origin: Int, step: Int) -> Int {
-        for offset in 1...15 {
-            let zeroBased = (origin - 1 + step * offset + 150) % 15
-            let candidate = zeroBased + 1
-            if availableStreamSlots.contains(candidate) { return candidate }
+        let ordered = availableStreamSlots.filter { (1...16).contains($0) }.sorted()
+        guard !ordered.isEmpty else { return origin }
+        guard let originIndex = ordered.firstIndex(of: origin) else {
+            return step < 0 ? ordered.last! : ordered.first!
         }
-        return origin
+        let direction = step < 0 ? -1 : 1
+        return ordered[(originIndex + direction + ordered.count) % ordered.count]
     }
 
     private func prewarmAdjacentStreams(baseURL: URL, around slot: Int) {
@@ -1248,7 +1298,10 @@ final class StreamViewController: UIViewController {
     }
 
     private func refreshStreamControls() {
-        currentSlotButton.setTitle(String(format: "GAME %02d", selectedSlot), for: .normal)
+        currentSlotButton.setTitle(
+            selectedSlot == 16 ? "ALL 16" : String(format: "GAME %02d", selectedSlot),
+            for: .normal
+        )
         streamSlotPicker.apply(selectedSlot: selectedSlot, availableSlots: availableStreamSlots)
     }
 
@@ -1309,6 +1362,12 @@ final class StreamViewController: UIViewController {
     }
 
     private func enqueueRemoteInput(_ request: StreamInputRequest) {
+        guard selectedSlot != 16 else {
+            setStatus("Slot 16 只供全局觀看", good: false)
+            showInputToast("SLOT 16 VIEW ONLY", good: false)
+            closeKeyboardPanel()
+            return
+        }
         guard configuredBaseURL() != nil else {
             setStatus("Tailnet host URL is required", good: false)
             showInputToast("HOST URL REQUIRED", good: false)
@@ -1450,11 +1509,8 @@ final class StreamViewController: UIViewController {
                     self.applyGUIBridgeState()
                     if response.executionOwner != "GUI_TEST_PC" || heartbeat?.executionOwner != "GUI_TEST_PC" {
                         self.guiPanel.setStatus("拒絕：bridge execution owner 不是 GUI_TEST_PC。", good: false)
-                    } else if !self.guiPanel.isHidden {
-                        self.guiPanel.setStatus(
-                            self.bridgeHeartbeatFresh ? "GUI_TEST_PC 已連線，等待橋接命令。" : "GUI_TEST_PC heartbeat 已過期。",
-                            good: self.bridgeHeartbeatFresh
-                        )
+                    } else if !self.guiPanel.isHidden, self.bridgeHeartbeatFresh {
+                        self.guiPanel.setStatus("GUI_TEST_PC 已連線，等待橋接命令。", good: true)
                     }
                 case .failure(let error):
                     if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
