@@ -73,16 +73,16 @@ function Start-HiddenProcess {
 }
 
 function Stop-IdentifiedProcess {
-    param([int]$Pid, [string]$ExpectedPath)
-    if ($Pid -le 0 -or !$ExpectedPath) { return }
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$Pid" -ErrorAction SilentlyContinue
+    param([int]$ProcessId, [string]$ExpectedPath)
+    if ($ProcessId -le 0 -or !$ExpectedPath) { return }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
     if (!$process) { return }
     if ([string]::Equals(
             [string]$process.ExecutablePath,
             [string]$ExpectedPath,
             [System.StringComparison]::OrdinalIgnoreCase
         )) {
-        Stop-Process -Id $Pid -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
     }
 }
 

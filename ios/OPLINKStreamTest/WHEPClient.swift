@@ -45,7 +45,6 @@ final class WHEPClient: NSObject {
     private var remoteTrack: RTCVideoTrack?
     private var sessionURL: URL?
     private var iceReady: (() -> Void)?
-    private var hasLocalCandidate = false
     private var connectionGeneration = 0
     private let readyLock = NSLock()
     private var ready = false
@@ -73,7 +72,6 @@ final class WHEPClient: NSObject {
         frameProbe.onFirstFrame = { [weak self] in
             self?.markReady(generation: generation)
         }
-        hasLocalCandidate = false
         readyLock.lock()
         ready = false
         readyLock.unlock()
@@ -116,7 +114,6 @@ final class WHEPClient: NSObject {
     func stop() {
         connectionGeneration += 1
         iceReady = nil
-        hasLocalCandidate = false
         if let remoteTrack {
             if let renderer { remoteTrack.remove(renderer) }
             remoteTrack.remove(frameProbe)
@@ -151,10 +148,11 @@ final class WHEPClient: NSObject {
     }
 
     private func waitForICE(peer: RTCPeerConnection, generation: Int, completion: @escaping () -> Void) {
-        if peer.iceGatheringState == .complete || hasLocalCandidate {
+        if peer.iceGatheringState == .complete {
             completion()
             return
         }
+        // WHEP needs the complete non-trickle offer so Tailscale candidates are included.
         var completed = false
         iceReady = { [weak self] in
             guard let self, generation == self.connectionGeneration, !completed else { return }
@@ -162,7 +160,7 @@ final class WHEPClient: NSObject {
             self.iceReady = nil
             completion()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self, generation == self.connectionGeneration, !completed else { return }
             completed = true
             self.iceReady = nil
@@ -281,13 +279,7 @@ extension WHEPClient: RTCPeerConnectionDelegate {
         if newState == .complete { iceReady?() }
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.peerConnection === peerConnection else { return }
-            self.hasLocalCandidate = true
-            self.iceReady?()
-        }
-    }
+    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
 

@@ -15,16 +15,16 @@ $ServerScript = [System.IO.Path]::GetFullPath((Join-Path $Root "stream_test_serv
 $Python = $null
 
 function Stop-IdentifiedProcess {
-    param([int]$Pid, [string]$ExpectedPath)
-    if ($Pid -le 0 -or !$ExpectedPath) { return $false }
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$Pid" -ErrorAction SilentlyContinue
+    param([int]$ProcessId, [string]$ExpectedPath)
+    if ($ProcessId -le 0 -or !$ExpectedPath) { return $false }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
     if (!$process) { return $false }
     if (-not [string]::Equals(
             [string]$process.ExecutablePath,
             [string]$ExpectedPath,
             [System.StringComparison]::OrdinalIgnoreCase
         )) { return $false }
-    Stop-Process -Id $Pid -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
     return $true
 }
 
