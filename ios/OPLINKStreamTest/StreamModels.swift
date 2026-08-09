@@ -23,11 +23,11 @@ struct StreamSourcesResponse: Decodable {
 }
 
 struct NetworkUnderlay: Decodable {
-    let gatePassed: Bool
-    let selectedAlias: String
-    let selectedDescription: String
-    let selectedEffectiveMetric: Int
-    let usbSharingCanWin: Bool
+    let gatePassed: Bool?
+    let selectedAlias: String?
+    let selectedDescription: String?
+    let selectedEffectiveMetric: Int?
+    let usbSharingCanWin: Bool?
     let overallDefaultAlias: String?
     let overallDefaultIsSelectedEthernet: Bool?
 

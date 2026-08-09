@@ -175,12 +175,18 @@ if (!$tailscaleDnsName) { throw "Tailscale did not return this host's DNS name."
 
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 $formalTokenPath = Join-Path $Root "runtime\input_token.txt"
+$nativeTokenPath = Join-Path $Root "runtime\native_single_input_token.txt"
 $inputTokenPath = Join-Path $Runtime "input_token.txt"
 if (!$DisableInput) {
-    if (!(Test-Path -LiteralPath $formalTokenPath -PathType Leaf)) {
+    $sourceTokenPath = if (Test-Path -LiteralPath $nativeTokenPath -PathType Leaf) {
+        $nativeTokenPath
+    } else {
+        $formalTokenPath
+    }
+    if (!(Test-Path -LiteralPath $sourceTokenPath -PathType Leaf)) {
         throw "The existing GUI_TEST_PC input token was not found."
     }
-    Copy-Item -LiteralPath $formalTokenPath -Destination $inputTokenPath -Force
+    Copy-Item -LiteralPath $sourceTokenPath -Destination $inputTokenPath -Force
 }
 
 $layoutText = & $Python $ServerScript --slots 1 --repair-stream-layout `
@@ -203,6 +209,7 @@ $state = [ordered]@{
     api_port = $ApiPort
     profile = [ordered]@{ encoded = [ordered]@{ w = $OutputWidth; h = $OutputHeight }; fps = $Fps; bitrate_kbps = $BitrateKbps }
     encoder = $selectedEncoder
+    network_underlay = $legacyHealth.network_underlay
     layout = $layout
     source_identity = $identity
     legacy_health_before = [ordered]@{ ok = $legacyHealth.ok; stream_mode = $legacyHealth.stream_mode; profile = $legacyHealth.profile }

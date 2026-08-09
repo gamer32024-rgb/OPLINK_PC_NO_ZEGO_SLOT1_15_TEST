@@ -1294,7 +1294,10 @@ final class StreamViewController: UIViewController {
             ? "ETH"
             : (network.overallDefaultAlias ?? "UNKNOWN")
         lastInputBackend = response.input.reportMode ?? "disabled"
-        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(network.selectedAlias) m=\(network.selectedEffectiveMetric) | USB-WIN \(network.usbSharingCanWin ? "YES" : "NO") | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
+        let selectedAlias = network.selectedAlias ?? "UNKNOWN"
+        let selectedMetric = network.selectedEffectiveMetric.map(String.init) ?? "--"
+        let usbCanWin = network.usbSharingCanWin == true ? "YES" : "NO"
+        sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(selectedAlias) m=\(selectedMetric) | USB-WIN \(usbCanWin) | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
     }
 
     private func refreshStreamControls() {
