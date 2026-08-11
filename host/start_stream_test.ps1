@@ -27,6 +27,8 @@ param(
     [string]$SlotPidMapPath = "D:\15game\gui_test_pc_slot_pids.json",
     [ValidateRange(1024, 65535)]
     [int]$ApiPort = 5110,
+    [ValidateRange(1024, 65535)]
+    [int]$ServeHttpsPort = 443,
     [switch]$ConfigureTailscaleServe,
     [switch]$AllowNonEthernetUnderlay,
     [switch]$AllowVpnDefaultRoute,
@@ -45,7 +47,7 @@ if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("Profile")) {
     $Profile = "720p"
 }
 if ($nativeProfileDefaults -and !$PSBoundParameters.ContainsKey("BitrateKbps")) {
-    $BitrateKbps = 2200
+    $BitrateKbps = 3000
 }
 $Runtime = Join-Path $Root "runtime"
 $StatePath = Join-Path $Runtime "state.json"
@@ -259,6 +261,11 @@ if (!$tailscaleIPv4) { throw "No active Tailscale IPv4 address was found." }
 $tailscaleStatus = & $Tailscale status --json | ConvertFrom-Json
 $tailscaleDnsName = ([string]$tailscaleStatus.Self.DNSName).TrimEnd(".")
 if (!$tailscaleDnsName) { throw "Tailscale did not return this host's DNS name." }
+$serveAuthority = if ($ServeHttpsPort -eq 443) {
+    $tailscaleDnsName
+} else {
+    "${tailscaleDnsName}:$ServeHttpsPort"
+}
 $networkUnderlay = Get-PhysicalUnderlayGate
 
 $customOutputWidth = $PSBoundParameters.ContainsKey("OutputWidth")
@@ -313,7 +320,11 @@ New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 $configText = (Get-Content -LiteralPath $TemplatePath -Raw).Replace("__TAILSCALE_IPV4__", $tailscaleIPv4)
 [System.IO.File]::WriteAllText($RuntimeConfig, $configText, [System.Text.UTF8Encoding]::new($false))
 $inputToken = ""
-$inputTokenPath = Join-Path $Runtime "input_token.txt"
+$inputTokenPath = if ($StreamMode -eq "native_single") {
+    Join-Path $Runtime "native_single_input_token.txt"
+} else {
+    Join-Path $Runtime "input_token.txt"
+}
 $picoHealth = $null
 if ($inputMode -eq "disabled") {
     if (Test-Path -LiteralPath $inputTokenPath) { Remove-Item -LiteralPath $inputTokenPath -Force }
@@ -392,7 +403,11 @@ try {
         "--viewer-idle-timeout-seconds", "$ViewerIdleTimeoutSeconds"
     )
     if ($StreamMode -eq "native_single") {
-        $apiArguments += @("--native-router", $NativeRouter, "--native-path", "oplink_active")
+        $apiArguments += @(
+            "--native-router", $NativeRouter,
+            "--native-path", "oplink_active",
+            "--disable-overview"
+        )
     }
     if ($inputMode -eq "direct") {
         $apiArguments += @("--pico-config", $PicoConfig, "--input-token-file", $inputTokenPath)
@@ -465,9 +480,9 @@ try {
         tailscale = [ordered]@{
             ipv4 = $tailscaleIPv4
             host = $tailscaleDnsName
-            app_base_url = "https://$tailscaleDnsName"
-            sources_url = "https://$tailscaleDnsName/oplink-test/api/v1/sources"
-            whep_base_url = "https://$tailscaleDnsName/oplink-whep"
+            app_base_url = "https://$serveAuthority"
+            sources_url = "https://$serveAuthority/oplink-test/api/v1/sources"
+            whep_base_url = "https://$serveAuthority/oplink-whep"
         }
         pids = [ordered]@{
             mediamtx = $media.Id
@@ -478,9 +493,9 @@ try {
     [System.IO.File]::WriteAllText($StatePath, ($state | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
 
     if ($ConfigureTailscaleServe) {
-        & $Tailscale serve --bg --https=443 --set-path /oplink-test "http://127.0.0.1:$ApiPort"
+        & $Tailscale serve --bg --https=$ServeHttpsPort --set-path /oplink-test "http://127.0.0.1:$ApiPort"
         if ($LASTEXITCODE -ne 0) { throw "Could not configure the /oplink-test Tailscale Serve mount." }
-        & $Tailscale serve --bg --https=443 --set-path /oplink-whep "http://127.0.0.1:8889"
+        & $Tailscale serve --bg --https=$ServeHttpsPort --set-path /oplink-whep "http://127.0.0.1:8889"
         if ($LASTEXITCODE -ne 0) { throw "Could not configure the /oplink-whep Tailscale Serve mount." }
     }
 
@@ -509,15 +524,15 @@ try {
             $identity.slot, $identity.hwnd, $identity.client_logical.w, $identity.client_logical.h, `
             $identity.capture_physical_expected.w, $identity.capture_physical_expected.h, $identity.aspect)
     }
-    Write-Host "iOS app host: https://$tailscaleDnsName"
+    Write-Host "iOS app host: https://$serveAuthority"
     Write-Host "iOS pairing token: $(if ($inputMode -eq 'disabled') { '<disabled>' } else { $inputToken })"
     Write-Host "Underlay gate: pass=$($networkUnderlay.gate_passed) Ethernet=$($networkUnderlay.selected_alias) metric=$($networkUnderlay.selected_effective_metric) USB-can-win=$($networkUnderlay.usb_sharing_can_win) default=$($networkUnderlay.overall_default_alias)"
     Write-Host "Pico input: $(if ($inputMode -eq 'disabled') { 'disabled' } elseif ($inputMode -eq 'direct') { "$($picoHealth.report_mode) direct on $($picoHealth.port)" } else { "$($guiInputHealth.report_mode) via GUI_TEST_PC on $($guiInputHealth.port)" })"
-    Write-Host "Metadata: https://$tailscaleDnsName/oplink-test/api/v1/sources"
+    Write-Host "Metadata: https://$serveAuthority/oplink-test/api/v1/sources"
     if ($StreamMode -eq "native_single") {
-        Write-Host "WHEP native single: https://$tailscaleDnsName/oplink-whep/oplink_active/whep"
+        Write-Host "WHEP native single: https://$serveAuthority/oplink-whep/oplink_active/whep"
     } else {
-        Write-Host "WHEP slots $slotArgument`: https://$tailscaleDnsName/oplink-whep/slotNN/whep"
+        Write-Host "WHEP slots $slotArgument`: https://$serveAuthority/oplink-whep/slotNN/whep"
     }
 } catch {
     Stop-StartedProcesses

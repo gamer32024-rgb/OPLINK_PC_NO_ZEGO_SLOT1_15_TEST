@@ -51,7 +51,7 @@ final class StreamSlotPickerView: UIVisualEffectView {
             stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -20)
         ])
 
-        for slot in 1...16 {
+        for slot in 1...15 {
             let button = UIButton(type: .system)
             button.tag = slot
             button.setTitle(String(format: "%02d", slot), for: .normal)
@@ -59,7 +59,7 @@ final class StreamSlotPickerView: UIVisualEffectView {
             button.tintColor = .white
             button.layer.cornerRadius = 6
             button.layer.masksToBounds = true
-            button.accessibilityLabel = slot == 16 ? "All games overview" : "Game slot \(slot)"
+            button.accessibilityLabel = "Game slot \(slot)"
             button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
             button.heightAnchor.constraint(equalToConstant: 34).isActive = true
             buttons.append(button)

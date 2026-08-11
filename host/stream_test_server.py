@@ -1171,7 +1171,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 plus overview stream service")
+    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 stream service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5110)
     parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
@@ -1194,6 +1194,7 @@ def main() -> int:
     parser.add_argument("--overview-path", default="oplink_overview")
     parser.add_argument("--overview-fps", type=int, default=10)
     parser.add_argument("--overview-bitrate-kbps", type=int, default=1800)
+    parser.add_argument("--enable-overview", action="store_true")
     parser.add_argument("--disable-overview", action="store_true")
     parser.add_argument("--encoder", choices=("nvenc", "mf", "x264"), default="x264")
     parser.add_argument("--width", type=int, default=1280)
@@ -1260,7 +1261,7 @@ def main() -> int:
                 viewer_idle_timeout_seconds=args.viewer_idle_timeout_seconds,
                 state_path=RUNTIME / "native_single_publisher.json",
             )
-            if not args.disable_overview:
+            if args.enable_overview and not args.disable_overview:
                 overview_controller = OverviewStreamController(
                     ffmpeg=args.ffmpeg,
                     encoder=args.encoder,

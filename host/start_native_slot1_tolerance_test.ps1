@@ -224,7 +224,7 @@ try {
         "--publisher-mode", "native_single", "--native-router", $NativeRouter,
         "--native-path", "oplink_active", "--width", "$OutputWidth", "--height", "$OutputHeight",
         "--fps", "$Fps", "--bitrate-kbps", "$BitrateKbps",
-        "--overview-path", "oplink_overview", "--overview-fps", "10", "--overview-bitrate-kbps", "1800",
+        "--disable-overview",
         "--publisher-cache-size", "1", "--viewer-idle-timeout-seconds", "15",
         "--mediamtx-api", $MediamtxApi, "--runtime-dir", $Runtime
     )

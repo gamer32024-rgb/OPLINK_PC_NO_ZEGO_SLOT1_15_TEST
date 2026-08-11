@@ -11,7 +11,6 @@ final class GUIControlPanelView: UIView {
     var onRequestPresetSave: ((Int, String, [String]) -> Void)?
 
     private let card = UIView()
-    private let slotSummaryLabel = UILabel()
     private let statusLabel = UILabel()
     private let slotButtons = (1...15).map { _ in UIButton(type: .system) }
     private let chainButtons = (0..<10).map { _ in UIButton(type: .system) }
@@ -164,9 +163,6 @@ final class GUIControlPanelView: UIView {
     }
 
     private func buildSlotsColumn() -> UIView {
-        slotSummaryLabel.text = "遊戲視窗 · 已選 0 · 運行 0"
-        styleSectionLabel(slotSummaryLabel)
-
         let grid = UIStackView()
         grid.axis = .vertical
         grid.spacing = 5
@@ -232,7 +228,6 @@ final class GUIControlPanelView: UIView {
         }
 
         let stack = UIStackView(arrangedSubviews: [
-            slotSummaryLabel,
             grid,
             compactActionRow([startAll, closeAll]),
             divider(),
@@ -275,17 +270,19 @@ final class GUIControlPanelView: UIView {
             chainGrid.addArrangedSubview(row)
         }
 
-        let play = textButton("播放", color: UIColor(red: 0.08, green: 0.62, blue: 0.32, alpha: 1))
+        let play = compactTextButton("播放", color: UIColor(red: 0.08, green: 0.62, blue: 0.32, alpha: 1))
         play.addTarget(self, action: #selector(playTapped), for: .touchUpInside)
-        let clear = textButton("清除", color: UIColor(white: 0.32, alpha: 1))
+        let clear = compactTextButton("清除", color: UIColor(white: 0.32, alpha: 1))
         clear.addTarget(self, action: #selector(clearChainTapped), for: .touchUpInside)
-        let stop = textButton("全止", color: UIColor(red: 0.8, green: 0.15, blue: 0.14, alpha: 1))
+        let stop = compactTextButton("全止", color: UIColor(red: 0.8, green: 0.15, blue: 0.14, alpha: 1))
         stop.addTarget(self, action: #selector(stopAllTapped), for: .touchUpInside)
 
         statusLabel.text = "等待 GUI_TEST_PC 狀態"
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.78)
         statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        statusLabel.numberOfLines = 2
+        statusLabel.numberOfLines = 1
+        statusLabel.adjustsFontSizeToFitWidth = true
+        statusLabel.minimumScaleFactor = 0.72
 
         let modulesTitle = UILabel()
         modulesTitle.text = "模組"
@@ -308,14 +305,25 @@ final class GUIControlPanelView: UIView {
             quickModuleGroupsStack.widthAnchor.constraint(equalTo: modulesScroll.frameLayoutGuide.widthAnchor)
         ])
 
-        let stack = UIStackView(arrangedSubviews: [
-            moduleHeader,
-            chainGrid,
+        let moduleContent = UIStackView(arrangedSubviews: [
             modulesTitle,
             modulesScroll,
-            statusLabel,
-            actionRow([play, clear, stop])
+            statusLabel
         ])
+        moduleContent.axis = .vertical
+        moduleContent.spacing = 5
+
+        let actionRail = UIStackView(arrangedSubviews: [UIView(), play, clear, stop])
+        actionRail.axis = .vertical
+        actionRail.spacing = 5
+        actionRail.alignment = .fill
+
+        let contentRow = UIStackView(arrangedSubviews: [moduleContent, actionRail])
+        contentRow.axis = .horizontal
+        contentRow.spacing = 6
+        contentRow.alignment = .fill
+
+        let stack = UIStackView(arrangedSubviews: [moduleHeader, chainGrid, contentRow])
         stack.axis = .vertical
         stack.spacing = 5
         return stack
@@ -499,7 +507,6 @@ final class GUIControlPanelView: UIView {
     }
 
     private func refreshSlotButtons() {
-        slotSummaryLabel.text = "遊戲視窗 · 已選 \(selectedSlots.count) · 運行 \(runningSlots.count)"
         for button in slotButtons {
             let slot = button.tag
             let running = runningSlots.contains(slot)
@@ -617,14 +624,6 @@ final class GUIControlPanelView: UIView {
         return button
     }
 
-    private func actionRow(_ buttons: [UIButton]) -> UIStackView {
-        let row = UIStackView(arrangedSubviews: buttons)
-        row.axis = .horizontal
-        row.spacing = 5
-        row.distribution = .fillEqually
-        return row
-    }
-
     private func compactTextButton(_ title: String, color: UIColor) -> UIButton {
         let button = textButton(title, color: color, height: 27, fontSize: 11)
         button.widthAnchor.constraint(equalToConstant: 44).isActive = true
@@ -644,12 +643,6 @@ final class GUIControlPanelView: UIView {
         view.backgroundColor = UIColor.white.withAlphaComponent(0.16)
         view.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return view
-    }
-
-    private func styleSectionLabel(_ label: UILabel) {
-        label.textColor = .white
-        label.font = .systemFont(ofSize: 11, weight: .bold)
-        label.adjustsFontSizeToFitWidth = true
     }
 
     private func clearStack(_ stack: UIStackView) {
@@ -704,7 +697,14 @@ final class GUIControlPanelView: UIView {
     @objc private func chainTapped(_ sender: UIButton) {
         activePresetIndex = nil
         activeChainIndex = sender.tag
+        if let removedModule = moduleChain[activeChainIndex] {
+            moduleChain[activeChainIndex] = nil
+            refreshChainButtons()
+            setStatus("已清除第 \(activeChainIndex + 1) 格：\(removedModule)", good: true)
+            return
+        }
         refreshChainButtons()
+        setStatus("第 \(activeChainIndex + 1) 格等待選擇模組", good: true)
     }
 
     @objc private func presetTapped(_ sender: UIButton) {

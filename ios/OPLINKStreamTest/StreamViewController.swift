@@ -10,12 +10,10 @@ final class StreamViewController: UIViewController {
     private enum StreamMode: Equatable {
         case legacyWarmCache
         case nativeSingle
-        case overview
 
         init(serverValue: String?) {
             switch serverValue {
             case "native_single": self = .nativeSingle
-            case "overview": self = .overview
             default: self = .legacyWarmCache
             }
         }
@@ -37,7 +35,6 @@ final class StreamViewController: UIViewController {
     private let sourceLabel = UILabel()
     private let metricsLabel = UILabel()
     private let targetLabel = UILabel()
-    private let slotWatermarkLabel = UILabel()
     private let streamSlotPicker = StreamSlotPickerView(effect: nil)
     private let guiPanel = GUIControlPanelView(frame: .zero)
     private let legacyControls = LegacyStreamControlsView()
@@ -54,7 +51,6 @@ final class StreamViewController: UIViewController {
     private var singleWHEPClient: WHEPClient?
     private var activeWHEPSlot: Int?
     private var pendingWHEPSlot: Int?
-    private var displayedSlot: Int?
     private var pendingRenderedSlot: Int?
     private var pendingRenderedGeneration: Int?
     private var pendingNativeRenderedSlot: Int?
@@ -196,25 +192,6 @@ final class StreamViewController: UIViewController {
             touchOverlay.trailingAnchor.constraint(equalTo: videoView.trailingAnchor),
             touchOverlay.topAnchor.constraint(equalTo: videoView.topAnchor),
             touchOverlay.bottomAnchor.constraint(equalTo: videoView.bottomAnchor)
-        ])
-
-        slotWatermarkLabel.translatesAutoresizingMaskIntoConstraints = false
-        slotWatermarkLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
-        slotWatermarkLabel.textColor = UIColor(red: 0.315, green: 0.9, blue: 0.18, alpha: 0.92)
-        slotWatermarkLabel.textAlignment = .center
-        slotWatermarkLabel.isUserInteractionEnabled = false
-        slotWatermarkLabel.isHidden = true
-        slotWatermarkLabel.alpha = 0.6
-        slotWatermarkLabel.layer.shadowColor = UIColor(red: 0.2, green: 1, blue: 0.1, alpha: 1).cgColor
-        slotWatermarkLabel.layer.shadowOpacity = 0.8
-        slotWatermarkLabel.layer.shadowRadius = 3
-        slotWatermarkLabel.layer.shadowOffset = .zero
-        view.addSubview(slotWatermarkLabel)
-        NSLayoutConstraint.activate([
-            slotWatermarkLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            slotWatermarkLabel.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            slotWatermarkLabel.widthAnchor.constraint(equalToConstant: 28),
-            slotWatermarkLabel.heightAnchor.constraint(equalToConstant: 22)
         ])
 
         streamSlotPicker.translatesAutoresizingMaskIntoConstraints = false
@@ -392,7 +369,7 @@ final class StreamViewController: UIViewController {
               view.bounds.width > 0,
               view.bounds.height > 0 else { return }
         let safe = view.safeAreaLayoutGuide.layoutFrame
-        let halfWidth = max(19, legacyControls.bounds.width / 2)
+        let halfWidth = max(17, legacyControls.bounds.width / 2)
         let halfHeight = max(19, legacyControls.bounds.height / 2)
         centerX.constant = min(
             max(centerX.constant, safe.minX + halfWidth),
@@ -573,7 +550,7 @@ final class StreamViewController: UIViewController {
         metricsLabel.numberOfLines = 2
         targetLabel.font = .systemFont(ofSize: 10, weight: .bold)
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
-        targetLabel.text = "TARGET 1280x720 / 30 FPS / 2200 KBPS / SWITCH < 1000 MS"
+        targetLabel.text = "TARGET 1280x720 / 30 FPS / 3000 KBPS / SWITCH < 1000 MS"
 
         let stack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
         stack.axis = .vertical
@@ -603,21 +580,19 @@ final class StreamViewController: UIViewController {
     private func configureCallbacks() {
         frameMonitor.onFirstFrame = { [weak self] size, generation in
             guard let self else { return }
-            guard self.streamMode == .legacyWarmCache || self.streamMode == .overview,
+            guard self.streamMode == .legacyWarmCache,
                   generation == self.pendingRenderedGeneration,
                   let renderedSlot = self.pendingRenderedSlot,
                   self.activeWHEPSlot == renderedSlot else { return }
-            self.displayedSlot = renderedSlot
             self.pendingRenderedSlot = nil
             self.pendingRenderedGeneration = nil
-            self.updateSlotWatermark()
+            self.legacyControls.setCurrentSlot(renderedSlot)
             self.renderedSize = size
             if let switchStartedAt = self.switchStartedAt {
                 self.lastSwitchMilliseconds = Int(Date().timeIntervalSince(switchStartedAt) * 1000)
             }
             self.switchStartedAt = nil
-            self.touchOverlay.isUserInteractionEnabled = self.streamMode != .overview
-                && self.latestResponse?.input.enabled == true
+            self.touchOverlay.isUserInteractionEnabled = self.latestResponse?.input.enabled == true
                 && self.latestResponse?.input.executionOwner == "GUI_TEST_PC"
             self.setStatus("Slot \(self.selectedSlot) 首幀完成", good: true)
             self.updateMetrics()
@@ -630,10 +605,9 @@ final class StreamViewController: UIViewController {
                   self.streamMode == .nativeSingle,
                   generation == self.pendingNativeSwitchGeneration,
                   let renderedSlot = self.pendingNativeRenderedSlot else { return }
-            self.displayedSlot = renderedSlot
             self.pendingNativeRenderedSlot = nil
             self.pendingNativeSwitchGeneration = nil
-            self.updateSlotWatermark()
+            self.legacyControls.setCurrentSlot(renderedSlot)
             self.renderedSize = size
             if let switchStartedAt = self.switchStartedAt {
                 self.lastSwitchMilliseconds = Int(
@@ -828,7 +802,7 @@ final class StreamViewController: UIViewController {
         connectionSequence += 1
         prewarmSequence += 1
         sendViewerState("background", slot: selectedSlot, allowBackgroundExecution: true)
-        if streamMode == .legacyWarmCache || streamMode == .overview {
+        if streamMode == .legacyWarmCache {
             resetWHEPClients()
         }
         touchOverlay.isUserInteractionEnabled = false
@@ -863,7 +837,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func connect(slot: Int) {
-        guard (1...16).contains(slot) else { return }
+        guard (1...15).contains(slot) else { return }
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
@@ -887,11 +861,6 @@ final class StreamViewController: UIViewController {
         refreshStreamControls()
         setStatus("檢查 Slot \(slot) 視窗", good: false)
         updateMetrics()
-
-        if slot == 16 {
-            activateOverview(baseURL: baseURL, sequence: sequence)
-            return
-        }
 
         if streamMode == .legacyWarmCache,
            desiredWarmSlots.contains(slot),
@@ -931,7 +900,9 @@ final class StreamViewController: UIViewController {
                     self.setStatus(error.localizedDescription, good: false)
                 case .success(let response):
                     self.latestResponse = response
-                    self.availableStreamSlots = Set(response.sources.filter { $0.ok }.map(\.slot))
+                    self.availableStreamSlots = Set(
+                        response.sources.filter { $0.ok && (1...15).contains($0.slot) }.map(\.slot)
+                    )
                     self.refreshStreamControls()
                     guard let source = response.sources.first(where: { $0.slot == slot }), source.ok else {
                         let message = response.sources.first(where: { $0.slot == slot })?.error ?? "Slot \(slot) 不可用"
@@ -1042,44 +1013,6 @@ final class StreamViewController: UIViewController {
                         slot: slot,
                         switchGeneration: switchGeneration
                     )
-                }
-            }
-        }
-    }
-
-    private func activateOverview(baseURL: URL, sequence: Int) {
-        if streamMode != .overview {
-            resetWHEPClients()
-            streamMode = .overview
-        }
-        touchOverlay.isUserInteractionEnabled = false
-        setStatus("正在啟動 15-Slot 全局畫面", good: false)
-        streamAPI.activate(baseURL: baseURL, slot: 16) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self,
-                      sequence == self.connectionSequence,
-                      self.selectedSlot == 16 else { return }
-                switch result {
-                case .failure(let error):
-                    self.setStatus(error.localizedDescription, good: false)
-                case .success(let activation):
-                    guard activation.ok,
-                          activation.publisherAlive,
-                          activation.activeSlot == 16,
-                          activation.streamMode == "overview" else {
-                        self.setStatus("主機未能啟動 Slot 16 全局畫面", good: false)
-                        return
-                    }
-                    self.lastPublisherActivationMilliseconds = activation.activationMs
-                    self.pendingWHEPSlot = 16
-                    self.updateMetrics()
-                    let client = self.whepClient(baseURL: baseURL, slot: 16)
-                    if client.isReady {
-                        self.lastWHEPConnectMilliseconds = 0
-                        self.displayWHEP(slot: 16)
-                    } else if !client.isStarted {
-                        client.connect(endpoint: StreamEndpoint.overviewWhep(base: baseURL))
-                    }
                 }
             }
         }
@@ -1222,7 +1155,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func adjacentAvailableSlot(from origin: Int, step: Int) -> Int {
-        let ordered = availableStreamSlots.filter { (1...16).contains($0) }.sorted()
+        let ordered = availableStreamSlots.filter { (1...15).contains($0) }.sorted()
         guard !ordered.isEmpty else { return origin }
         guard let originIndex = ordered.firstIndex(of: origin) else {
             return step < 0 ? ordered.last! : ordered.first!
@@ -1274,14 +1207,13 @@ final class StreamViewController: UIViewController {
         singleWHEPClient = nil
         activeWHEPSlot = nil
         pendingWHEPSlot = nil
-        displayedSlot = nil
         pendingRenderedSlot = nil
         pendingRenderedGeneration = nil
         pendingNativeRenderedSlot = nil
         pendingNativeSwitchGeneration = nil
         nativeRouterPID = nil
         _ = frameMonitor.reset()
-        updateSlotWatermark()
+        legacyControls.setCurrentSlot(selectedSlot)
         desiredWarmSlots.removeAll()
         prewarmSequence += 1
     }
@@ -1301,10 +1233,8 @@ final class StreamViewController: UIViewController {
     }
 
     private func refreshStreamControls() {
-        currentSlotButton.setTitle(
-            selectedSlot == 16 ? "ALL 16" : String(format: "GAME %02d", selectedSlot),
-            for: .normal
-        )
+        currentSlotButton.setTitle(String(format: "GAME %02d", selectedSlot), for: .normal)
+        legacyControls.setCurrentSlot(selectedSlot)
         streamSlotPicker.apply(selectedSlot: selectedSlot, availableSlots: availableStreamSlots)
     }
 
@@ -1313,16 +1243,6 @@ final class StreamViewController: UIViewController {
         statusLabel.textColor = good
             ? UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
             : UIColor(red: 1, green: 0.76, blue: 0.31, alpha: 1)
-    }
-
-    private func updateSlotWatermark() {
-        guard let displayedSlot else {
-            slotWatermarkLabel.text = nil
-            slotWatermarkLabel.isHidden = true
-            return
-        }
-        slotWatermarkLabel.text = "\(displayedSlot)"
-        slotWatermarkLabel.isHidden = false
     }
 
     @objc private func sampleRenderedFrames() {
@@ -1365,12 +1285,6 @@ final class StreamViewController: UIViewController {
     }
 
     private func enqueueRemoteInput(_ request: StreamInputRequest) {
-        guard selectedSlot != 16 else {
-            setStatus("Slot 16 只供全局觀看", good: false)
-            showInputToast("SLOT 16 VIEW ONLY", good: false)
-            closeKeyboardPanel()
-            return
-        }
         guard configuredBaseURL() != nil else {
             setStatus("Tailnet host URL is required", good: false)
             showInputToast("HOST URL REQUIRED", good: false)

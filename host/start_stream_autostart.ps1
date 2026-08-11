@@ -8,11 +8,11 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSCommandPath
 $Runtime = Join-Path $Root "runtime"
-$LogPath = Join-Path $Runtime "autostart.log"
-$PidPath = Join-Path $Runtime "autostart.pid"
+$LogPath = Join-Path $Runtime "native_single_autostart.log"
+$PidPath = Join-Path $Runtime "native_single_autostart.pid"
 $StartScript = Join-Path $Root "start_stream_test.ps1"
 $SlotPidMapPath = "D:\15game\gui_test_pc_slot_pids.json"
-$mutex = [System.Threading.Mutex]::new($false, "Local\OPLINK_PC_Stream_Autostart")
+$mutex = [System.Threading.Mutex]::new($false, "Local\OPLINK_PC_Native_Single_Autostart")
 $hasMutex = $false
 $lastState = $null
 $exitCode = 0
@@ -50,9 +50,18 @@ function Test-GuiTestPcBridge {
 }
 
 function Test-StreamHost {
-    $health = Get-JsonEndpoint "http://127.0.0.1:5110/api/v1/health"
+    $health = Get-JsonEndpoint "http://127.0.0.1:5112/api/v1/health"
     $media = Get-JsonEndpoint "http://127.0.0.1:9997/v3/paths/list"
-    return $null -ne $health -and [bool]$health.ok -and $null -ne $media
+    $sourceSlots = @($health.sources | ForEach-Object { [int]$_.slot })
+    return $null -ne $health -and [bool]$health.ok -and
+        [string]$health.stream_mode -eq "native_single" -and
+        [int]$health.profile.encoded.w -eq 1280 -and
+        [int]$health.profile.encoded.h -eq 720 -and
+        [int]$health.profile.fps -eq 30 -and
+        [int]$health.profile.bitrate_kbps -eq 3000 -and
+        $sourceSlots.Count -eq 15 -and
+        @($sourceSlots | Where-Object { $_ -lt 1 -or $_ -gt 15 }).Count -eq 0 -and
+        $null -ne $media
 }
 
 function Get-ReadyGameSlotCount {
@@ -74,17 +83,20 @@ function Get-ReadyGameSlotCount {
 }
 
 function Start-OplinkStreamHost {
-    Remove-Item -LiteralPath (Join-Path $Runtime "autostart_host_start.out.log") `
+    Remove-Item -LiteralPath (Join-Path $Runtime "native_single_autostart_host_start.out.log") `
         -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $Runtime "autostart_host_start.err.log") `
+    Remove-Item -LiteralPath (Join-Path $Runtime "native_single_autostart_host_start.err.log") `
         -Force -ErrorAction SilentlyContinue
     $startParameters = @{
-        Profile = "1080p"
+        Profile = "720p"
         Fps = 30
-        BitrateKbps = 6000
-        PublisherCacheSize = 3
+        BitrateKbps = 3000
+        PublisherCacheSize = 1
         ViewerIdleTimeoutSeconds = 15
+        StreamMode = "native_single"
         Encoder = "mf"
+        ApiPort = 5112
+        ServeHttpsPort = 8443
         ConfigureTailscaleServe = $true
         AllowVpnDefaultRoute = $true
         Restart = $true
@@ -102,7 +114,7 @@ try {
         $hasMutex = $true
     }
     if (!$hasMutex) {
-        Write-Output "OPLINK_PC stream autostart is already running."
+        Write-Output "OPLINK 720p native stream autostart is already running."
         return
     }
     [System.IO.File]::WriteAllText($PidPath, [string]$PID, [System.Text.UTF8Encoding]::new($false))
@@ -122,7 +134,7 @@ try {
                     Set-WatchdogState "WAITING_GAME_WINDOWS" "$readySlots/15 registered StarCG processes are ready; start the remaining slots manually from GUI_TEST_PC."
                     $exitCode = 3
                 } elseif ($streamReady -and !$gameSetWasIncomplete) {
-                    Set-WatchdogState "READY" "GUI_TEST_PC, 15/15 game windows, API, MediaMTX, WHEP, and Tailscale Serve are ready."
+                    Set-WatchdogState "READY" "GUI_TEST_PC, 15/15 game windows, native API 5112, MediaMTX, one WHEP source, and Tailscale Serve 8443 are ready."
                     $exitCode = 0
                 } else {
                     Set-WatchdogState "STARTING_STREAM_HOST" "15/15 game windows are ready; refreshing layout and starting the stream host."

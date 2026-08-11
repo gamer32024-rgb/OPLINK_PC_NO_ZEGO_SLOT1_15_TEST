@@ -32,9 +32,9 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         previousButton.isHidden = !expanded
         listButton.isHidden = !expanded
         nextButton.isHidden = !expanded
-        widthConstraint.constant = expanded ? 44 : 38
+        widthConstraint.constant = expanded ? 40 : 34
         heightConstraint.constant = expanded ? 112 : 38
-        layer.cornerRadius = expanded ? 22 : 19
+        layer.cornerRadius = expanded ? 20 : 17
         onExpandedChanged?(expanded)
 
         let updates: () -> Void = {
@@ -54,16 +54,34 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         }
     }
 
+    func setCurrentSlot(_ slot: Int) {
+        listButton.setImage(nil, for: .normal)
+        listButton.setTitle(String(format: "%02d", slot), for: .normal)
+        listButton.setTitleColor(
+            UIColor(red: 0.46, green: 1.0, blue: 0.22, alpha: 1),
+            for: .normal
+        )
+        listButton.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        listButton.titleLabel?.layer.shadowColor = UIColor.systemGreen.cgColor
+        listButton.titleLabel?.layer.shadowOpacity = 1
+        listButton.titleLabel?.layer.shadowRadius = 3
+        listButton.titleLabel?.layer.shadowOffset = .zero
+        listButton.accessibilityLabel = "Game list, current slot \(slot)"
+    }
+
     private func buildLayout() {
         translatesAutoresizingMaskIntoConstraints = false
         alpha = 0.78
-        layer.cornerRadius = 19
+        layer.cornerRadius = 17
         layer.masksToBounds = true
 
         configure(toggleButton, icon: "arrow.up.arrow.down", label: "Open game switch controls")
         configure(previousButton, icon: "chevron.up", label: "Previous game")
         configure(listButton, icon: "list.bullet", label: "Game list")
         configure(nextButton, icon: "chevron.down", label: "Next game")
+        previousButton.imageView?.transform = CGAffineTransform(scaleX: 1, y: 1.1)
+        nextButton.imageView?.transform = CGAffineTransform(scaleX: 1, y: 1.1)
+        setCurrentSlot(1)
 
         toggleButton.addTarget(self, action: #selector(toggleTapped), for: .touchUpInside)
         previousButton.addTarget(self, action: #selector(previousTapped), for: .touchUpInside)
@@ -80,7 +98,7 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
 
-        widthConstraint = widthAnchor.constraint(equalToConstant: 38)
+        widthConstraint = widthAnchor.constraint(equalToConstant: 34)
         heightConstraint = heightAnchor.constraint(equalToConstant: 38)
         let buttonHeights = [
             toggleButton.heightAnchor.constraint(equalToConstant: 38),
