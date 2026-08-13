@@ -298,8 +298,11 @@ if ($StreamMode -eq "native_single") {
         "--client-height", "$profileHeight"
     )
 }
-$layoutRepairText = & $Python $ServerScript @layoutArguments
-if ($LASTEXITCODE -ne 0) { throw "Could not refresh and validate the 15 game render surfaces." }
+$layoutRepairText = @(& $Python $ServerScript @layoutArguments 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    $layoutRepairError = ($layoutRepairText | ForEach-Object { $_.ToString() }) -join "`n"
+    throw "Could not refresh and validate the 15 game render surfaces: $layoutRepairError"
+}
 $layoutRepair = $layoutRepairText | ConvertFrom-Json
 if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne $layoutSlots.Count) {
     throw "The $StreamMode stream layout preflight did not refresh the requested slots."
