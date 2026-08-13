@@ -11,6 +11,7 @@ $Runtime = Join-Path $Root "runtime"
 $LogPath = Join-Path $Runtime "native_single_autostart.log"
 $PidPath = Join-Path $Runtime "native_single_autostart.pid"
 $StartScript = Join-Path $Root "start_stream_test.ps1"
+$StreamProfilePath = Join-Path $Root "stream_profile.json"
 $SlotPidMapPath = "D:\15game\gui_test_pc_slot_pids.json"
 $mutex = [System.Threading.Mutex]::new($false, "Local\OPLINK_PC_Native_Single_Autostart")
 $hasMutex = $false
@@ -49,7 +50,25 @@ function Test-GuiTestPcBridge {
         [string]$health.execution_owner -eq "GUI_TEST_PC"
 }
 
+function Get-ConfiguredBitrateKbps {
+    $fallbackBitrateKbps = 3000
+    if (!(Test-Path -LiteralPath $StreamProfilePath -PathType Leaf)) {
+        return $fallbackBitrateKbps
+    }
+    try {
+        $profile = Get-Content -LiteralPath $StreamProfilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $bitrateKbps = [int]$profile.bitrate_kbps
+        if ($bitrateKbps -lt 250 -or $bitrateKbps -gt 20000) {
+            throw "bitrate_kbps must be between 250 and 20000"
+        }
+        return $bitrateKbps
+    } catch {
+        throw "Invalid stream profile $StreamProfilePath`: $($_.Exception.Message)"
+    }
+}
+
 function Test-StreamHost {
+    param([int]$ExpectedBitrateKbps)
     $health = Get-JsonEndpoint "http://127.0.0.1:5112/api/v1/health"
     $media = Get-JsonEndpoint "http://127.0.0.1:9997/v3/paths/list"
     $sourceSlots = @($health.sources | ForEach-Object { [int]$_.slot })
@@ -58,7 +77,7 @@ function Test-StreamHost {
         [int]$health.profile.encoded.w -eq 1280 -and
         [int]$health.profile.encoded.h -eq 720 -and
         [int]$health.profile.fps -eq 30 -and
-        [int]$health.profile.bitrate_kbps -eq 3000 -and
+        [int]$health.profile.bitrate_kbps -eq $ExpectedBitrateKbps -and
         $sourceSlots.Count -eq 15 -and
         @($sourceSlots | Where-Object { $_ -lt 1 -or $_ -gt 15 }).Count -eq 0 -and
         $null -ne $media
@@ -83,6 +102,7 @@ function Get-ReadyGameSlotCount {
 }
 
 function Start-OplinkStreamHost {
+    param([int]$BitrateKbps)
     Remove-Item -LiteralPath (Join-Path $Runtime "native_single_autostart_host_start.out.log") `
         -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $Runtime "native_single_autostart_host_start.err.log") `
@@ -90,7 +110,7 @@ function Start-OplinkStreamHost {
     $startParameters = @{
         Profile = "720p"
         Fps = 30
-        BitrateKbps = 3000
+        BitrateKbps = $BitrateKbps
         PublisherCacheSize = 1
         ViewerIdleTimeoutSeconds = 15
         StreamMode = "native_single"
@@ -123,7 +143,8 @@ try {
     while ($true) {
         try {
             $guiReady = Test-GuiTestPcBridge
-            $streamReady = Test-StreamHost
+            $configuredBitrateKbps = Get-ConfiguredBitrateKbps
+            $streamReady = Test-StreamHost -ExpectedBitrateKbps $configuredBitrateKbps
             if (!$guiReady) {
                 Set-WatchdogState "WAITING_GUI_TEST_PC" "Open GUI_TEST_PC manually; live-touch bridge 127.0.0.1:5111 is not ready."
                 $exitCode = 2
@@ -138,12 +159,12 @@ try {
                     $exitCode = 0
                 } else {
                     Set-WatchdogState "STARTING_STREAM_HOST" "15/15 game windows are ready; refreshing layout and starting the stream host."
-                    Start-OplinkStreamHost
-                    if (!(Test-StreamHost)) {
+                    Start-OplinkStreamHost -BitrateKbps $configuredBitrateKbps
+                    if (!(Test-StreamHost -ExpectedBitrateKbps $configuredBitrateKbps)) {
                         throw "Stream host did not pass local API and MediaMTX readiness checks."
                     }
                     $gameSetWasIncomplete = $false
-                    Set-WatchdogState "READY" "Stream host started successfully."
+                    Set-WatchdogState "READY" "Stream host started successfully at $configuredBitrateKbps kbps."
                     $exitCode = 0
                 }
             }

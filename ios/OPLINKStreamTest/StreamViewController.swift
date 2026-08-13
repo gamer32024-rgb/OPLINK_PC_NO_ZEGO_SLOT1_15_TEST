@@ -79,6 +79,13 @@ final class StreamViewController: UIViewController {
     private var bridgeTimer: Timer?
     private var viewerHeartbeatTimer: Timer?
     private var viewerIsForeground = false
+    private var viewerResumeSequence = 0
+    private var automaticReconnectAttempt = 0
+    private var automaticReconnectTask: DispatchWorkItem?
+    private var nativeFirstFrameTimeoutTask: DispatchWorkItem?
+    private var backgroundWHEPStopTask: DispatchWorkItem?
+    private var backgroundWHEPTaskIdentifier = UIBackgroundTaskIdentifier.invalid
+    private var viewerStateBackgroundTaskIdentifier = UIBackgroundTaskIdentifier.invalid
 
     private var bridgeTargetRunningSlots = Set<Int>()
     private var bridgeHeartbeatRunningSlots = Set<Int>()
@@ -147,8 +154,7 @@ final class StreamViewController: UIViewController {
         super.viewDidAppear(animated)
         requestLandscape()
         if configuredBaseURL() != nil {
-            beginViewerSession()
-            connect(slot: selectedSlot)
+            beginViewerSession(connectAfterActivation: true)
             refreshGUIBridgeState()
         } else {
             presentHostSettings()
@@ -168,6 +174,15 @@ final class StreamViewController: UIViewController {
         metricsTimer?.invalidate()
         bridgeTimer?.invalidate()
         viewerHeartbeatTimer?.invalidate()
+        automaticReconnectTask?.cancel()
+        nativeFirstFrameTimeoutTask?.cancel()
+        backgroundWHEPStopTask?.cancel()
+        if backgroundWHEPTaskIdentifier != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundWHEPTaskIdentifier)
+        }
+        if viewerStateBackgroundTaskIdentifier != .invalid {
+            UIApplication.shared.endBackgroundTask(viewerStateBackgroundTaskIdentifier)
+        }
         keyboardFlushTask?.cancel()
         NotificationCenter.default.removeObserver(self)
         whepClients.values.forEach { $0.stop() }
@@ -550,7 +565,7 @@ final class StreamViewController: UIViewController {
         metricsLabel.numberOfLines = 2
         targetLabel.font = .systemFont(ofSize: 10, weight: .bold)
         targetLabel.textColor = UIColor(red: 0.69, green: 0.93, blue: 0.47, alpha: 1)
-        targetLabel.text = "TARGET 1280x720 / 30 FPS / 3000 KBPS / SWITCH < 1000 MS"
+        targetLabel.text = "TARGET 1280x720 / 30 FPS / PC BITRATE / SWITCH < 1000 MS"
 
         let stack = UIStackView(arrangedSubviews: [metricsLabel, targetLabel])
         stack.axis = .vertical
@@ -607,6 +622,11 @@ final class StreamViewController: UIViewController {
                   let renderedSlot = self.pendingNativeRenderedSlot else { return }
             self.pendingNativeRenderedSlot = nil
             self.pendingNativeSwitchGeneration = nil
+            self.nativeFirstFrameTimeoutTask?.cancel()
+            self.nativeFirstFrameTimeoutTask = nil
+            self.automaticReconnectTask?.cancel()
+            self.automaticReconnectTask = nil
+            self.automaticReconnectAttempt = 0
             self.legacyControls.setCurrentSlot(renderedSlot)
             self.renderedSize = size
             if let switchStartedAt = self.switchStartedAt {
@@ -773,10 +793,15 @@ final class StreamViewController: UIViewController {
         }
     }
 
-    private func beginViewerSession() {
-        guard !viewerIsForeground else { return }
+    private func beginViewerSession(connectAfterActivation: Bool = false) {
+        guard !viewerIsForeground else {
+            if connectAfterActivation { connect(slot: selectedSlot) }
+            return
+        }
+        cancelBackgroundWHEPStop()
         viewerIsForeground = true
-        sendViewerState("active", slot: selectedSlot)
+        viewerResumeSequence += 1
+        let resumeSequence = viewerResumeSequence
         viewerHeartbeatTimer?.invalidate()
         let timer = Timer(
             timeInterval: 3,
@@ -787,6 +812,29 @@ final class StreamViewController: UIViewController {
         )
         viewerHeartbeatTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+        if connectAfterActivation {
+            resumeViewerAndConnect(sequence: resumeSequence)
+        } else {
+            sendViewerState("active", slot: selectedSlot)
+        }
+    }
+
+    private func resumeViewerAndConnect(sequence: Int) {
+        guard viewerIsForeground, sequence == viewerResumeSequence else { return }
+        let slot = selectedSlot
+        // connect() posts the first active state without waiting for it.
+        connect(slot: slot)
+
+        // Route recovery can lag behind UIApplication foreground callbacks.
+        for delay in [0.35, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.viewerIsForeground,
+                      sequence == self.viewerResumeSequence,
+                      slot == self.selectedSlot else { return }
+                self.sendViewerState("active", slot: slot)
+            }
+        }
     }
 
     @objc private func sendViewerHeartbeat() {
@@ -799,20 +847,57 @@ final class StreamViewController: UIViewController {
         viewerIsForeground = false
         viewerHeartbeatTimer?.invalidate()
         viewerHeartbeatTimer = nil
+        viewerResumeSequence += 1
         connectionSequence += 1
         prewarmSequence += 1
+        automaticReconnectTask?.cancel()
+        automaticReconnectTask = nil
+        automaticReconnectAttempt = 0
+        nativeFirstFrameTimeoutTask?.cancel()
+        nativeFirstFrameTimeoutTask = nil
         sendViewerState("background", slot: selectedSlot, allowBackgroundExecution: true)
         if streamMode == .legacyWarmCache {
             resetWHEPClients()
+        } else {
+            scheduleBackgroundWHEPStop()
         }
         touchOverlay.isUserInteractionEnabled = false
     }
 
     @objc private func applicationDidBecomeActive() {
         guard isViewLoaded, view.window != nil, !viewerIsForeground else { return }
-        beginViewerSession()
-        connect(slot: selectedSlot)
+        beginViewerSession(connectAfterActivation: true)
         refreshGUIBridgeState()
+    }
+
+    private func scheduleBackgroundWHEPStop() {
+        cancelBackgroundWHEPStop()
+        backgroundWHEPTaskIdentifier = UIApplication.shared.beginBackgroundTask(
+            withName: "OPLINK WHEP one-second grace"
+        ) { [weak self] in
+            self?.finishBackgroundWHEPGrace(stopStream: true)
+        }
+        let task = DispatchWorkItem { [weak self] in
+            self?.finishBackgroundWHEPGrace(stopStream: true)
+        }
+        backgroundWHEPStopTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: task)
+    }
+
+    private func cancelBackgroundWHEPStop() {
+        finishBackgroundWHEPGrace(stopStream: false)
+    }
+
+    private func finishBackgroundWHEPGrace(stopStream: Bool) {
+        backgroundWHEPStopTask?.cancel()
+        backgroundWHEPStopTask = nil
+        if stopStream, !viewerIsForeground {
+            resetWHEPClients()
+        }
+        if backgroundWHEPTaskIdentifier != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundWHEPTaskIdentifier)
+            backgroundWHEPTaskIdentifier = .invalid
+        }
     }
 
     private func sendViewerState(
@@ -821,27 +906,41 @@ final class StreamViewController: UIViewController {
         allowBackgroundExecution: Bool = false
     ) {
         guard let baseURL = configuredBaseURL() else { return }
-        let backgroundTask = allowBackgroundExecution
-            ? UIApplication.shared.beginBackgroundTask(withName: "OPLINK viewer state", expirationHandler: nil)
-            : UIBackgroundTaskIdentifier.invalid
-        streamAPI.updateViewer(baseURL: baseURL, state: state, slot: slot) { _ in
-            guard backgroundTask != .invalid else { return }
-            DispatchQueue.main.async {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
+        if allowBackgroundExecution {
+            finishViewerStateBackgroundTask()
+            viewerStateBackgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(
+                withName: "OPLINK viewer state"
+            ) { [weak self] in
+                self?.finishViewerStateBackgroundTask()
             }
         }
+        streamAPI.updateViewer(baseURL: baseURL, state: state, slot: slot) { _ in
+            guard allowBackgroundExecution else { return }
+            DispatchQueue.main.async { [weak self] in self?.finishViewerStateBackgroundTask() }
+        }
+    }
+
+    private func finishViewerStateBackgroundTask() {
+        guard viewerStateBackgroundTaskIdentifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(viewerStateBackgroundTaskIdentifier)
+        viewerStateBackgroundTaskIdentifier = .invalid
     }
 
     private func adjacentAvailableSlot(step: Int) -> Int {
         adjacentAvailableSlot(from: selectedSlot, step: step)
     }
 
-    private func connect(slot: Int) {
+    private func connect(slot: Int, automaticRetry: Bool = false) {
         guard (1...15).contains(slot) else { return }
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
         }
+        automaticReconnectTask?.cancel()
+        automaticReconnectTask = nil
+        nativeFirstFrameTimeoutTask?.cancel()
+        nativeFirstFrameTimeoutTask = nil
+        if !automaticRetry { automaticReconnectAttempt = 0 }
         if viewerIsForeground {
             sendViewerState("active", slot: slot)
         }
@@ -898,6 +997,7 @@ final class StreamViewController: UIViewController {
                 switch result {
                 case .failure(let error):
                     self.setStatus(error.localizedDescription, good: false)
+                    self.scheduleAutomaticReconnect(slot: slot, reason: error.localizedDescription)
                 case .success(let response):
                     self.latestResponse = response
                     self.availableStreamSlots = Set(
@@ -907,10 +1007,12 @@ final class StreamViewController: UIViewController {
                     guard let source = response.sources.first(where: { $0.slot == slot }), source.ok else {
                         let message = response.sources.first(where: { $0.slot == slot })?.error ?? "Slot \(slot) 不可用"
                         self.setStatus(message, good: false)
+                        self.scheduleAutomaticReconnect(slot: slot, reason: message)
                         return
                     }
                     guard source.aspectIs16x9 == true else {
                         self.setStatus("拒絕非 16:9 來源", good: false)
+                        self.scheduleAutomaticReconnect(slot: slot, reason: "來源暫時不是 16:9")
                         return
                     }
                     self.activateVerifiedSource(
@@ -923,6 +1025,29 @@ final class StreamViewController: UIViewController {
                 }
             }
         }
+    }
+
+    private func scheduleAutomaticReconnect(slot: Int, reason: String) {
+        guard viewerIsForeground, selectedSlot == slot else { return }
+        automaticReconnectTask?.cancel()
+        let delays: [TimeInterval] = [0.25, 0.75, 1.5, 3, 5, 5, 5, 5]
+        guard automaticReconnectAttempt < delays.count else {
+            automaticReconnectTask = nil
+            setStatus("自動重連未成功，請再按 Slot \(slot)：\(reason)", good: false)
+            return
+        }
+        let delay = delays[automaticReconnectAttempt]
+        automaticReconnectAttempt += 1
+        let task = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.viewerIsForeground,
+                  self.selectedSlot == slot else { return }
+            self.automaticReconnectTask = nil
+            self.connect(slot: slot, automaticRetry: true)
+        }
+        automaticReconnectTask = task
+        setStatus("Slot \(slot) 將於 \(String(format: "%.2g", delay)) 秒後重連", good: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
     }
 
     private func activateVerifiedSource(
@@ -951,12 +1076,14 @@ final class StreamViewController: UIViewController {
                 case .failure(let error):
                     self.latestResponse = nil
                     self.setStatus(error.localizedDescription, good: false)
+                    self.scheduleAutomaticReconnect(slot: slot, reason: error.localizedDescription)
                 case .success(let activation):
                     guard activation.ok,
                           activation.publisherAlive,
                           activation.activeSlot == slot else {
                         self.latestResponse = nil
                         self.setStatus("主機未能啟動 Slot \(slot) publisher", good: false)
+                        self.scheduleAutomaticReconnect(slot: slot, reason: "主機未能啟動 publisher")
                         return
                     }
                     self.lastPublisherActivationMilliseconds = activation.activationMs
@@ -988,6 +1115,7 @@ final class StreamViewController: UIViewController {
                 switch result {
                 case .failure(let error):
                     self.setStatus(error.localizedDescription, good: false)
+                    self.scheduleAutomaticReconnect(slot: slot, reason: error.localizedDescription)
                 case .success(let activation):
                     guard activation.ok,
                           activation.activeSlot == slot,
@@ -999,6 +1127,7 @@ final class StreamViewController: UIViewController {
                           let routerPID = activation.routerPID,
                           activation.encoderPID != nil else {
                         self.setStatus("主機未確認 Slot \(slot) 原生首幀", good: false)
+                        self.scheduleAutomaticReconnect(slot: slot, reason: "主機未確認原生首幀")
                         return
                     }
                     if let previousRouterPID = self.nativeRouterPID,
@@ -1037,10 +1166,11 @@ final class StreamViewController: UIViewController {
         client.onError = { [weak self, weak client] error in
             guard let self, let client,
                   self.singleWHEPClient === client else { return }
-            client.stop()
             self.singleWHEPClient = nil
+            client.stop()
             if self.streamMode == .nativeSingle {
                 self.setStatus(error.localizedDescription, good: false)
+                self.scheduleAutomaticReconnect(slot: self.selectedSlot, reason: error.localizedDescription)
             }
         }
         singleWHEPClient = client
@@ -1066,14 +1196,93 @@ final class StreamViewController: UIViewController {
         if client.isReady {
             lastWHEPConnectMilliseconds = 0
             client.setRenderer(frameMonitor)
+            armNativeFirstFrameTimeout(
+                baseURL: baseURL,
+                slot: slot,
+                switchGeneration: switchGeneration,
+                client: client,
+                timeout: 1.0,
+                replaceStaleClient: true
+            )
         } else if !client.isStarted {
             client.connect(
                 endpoint: StreamEndpoint.nativeWhep(base: baseURL),
                 renderer: frameMonitor
             )
+            armNativeFirstFrameTimeout(
+                baseURL: baseURL,
+                slot: slot,
+                switchGeneration: switchGeneration,
+                client: client,
+                timeout: 10.0,
+                replaceStaleClient: false
+            )
         } else {
             client.setRenderer(frameMonitor)
+            armNativeFirstFrameTimeout(
+                baseURL: baseURL,
+                slot: slot,
+                switchGeneration: switchGeneration,
+                client: client,
+                timeout: 10.0,
+                replaceStaleClient: false
+            )
         }
+    }
+
+    private func armNativeFirstFrameTimeout(
+        baseURL: URL,
+        slot: Int,
+        switchGeneration: Int,
+        client: WHEPClient,
+        timeout: TimeInterval,
+        replaceStaleClient: Bool
+    ) {
+        nativeFirstFrameTimeoutTask?.cancel()
+        let task = DispatchWorkItem { [weak self, weak client] in
+            guard let self,
+                  let client,
+                  self.viewerIsForeground,
+                  self.selectedSlot == slot,
+                  self.pendingNativeRenderedSlot == slot,
+                  self.pendingNativeSwitchGeneration == switchGeneration,
+                  self.singleWHEPClient === client else { return }
+            self.nativeFirstFrameTimeoutTask = nil
+            self.singleWHEPClient = nil
+            client.stop()
+            _ = self.frameMonitor.reset()
+            self.pendingNativeRenderedSlot = nil
+            self.pendingNativeSwitchGeneration = nil
+
+            guard replaceStaleClient else {
+                self.setStatus("WHEP 首幀逾時，準備重新連線", good: false)
+                self.scheduleAutomaticReconnect(slot: slot, reason: "WHEP 首幀逾時")
+                return
+            }
+
+            guard self.frameMonitor.expectFirstFrame(for: switchGeneration) else {
+                self.scheduleAutomaticReconnect(slot: slot, reason: "新畫面 generation 無法重設")
+                return
+            }
+            self.pendingNativeRenderedSlot = slot
+            self.pendingNativeSwitchGeneration = switchGeneration
+            self.setStatus("舊 WHEP 沒有新首幀，正在建立新連線", good: false)
+            let replacement = self.nativeWHEPClient()
+            replacement.connect(
+                endpoint: StreamEndpoint.nativeWhep(base: baseURL),
+                renderer: self.frameMonitor
+            )
+            self.armNativeFirstFrameTimeout(
+                baseURL: baseURL,
+                slot: slot,
+                switchGeneration: switchGeneration,
+                client: replacement,
+                timeout: 10.0,
+                replaceStaleClient: false
+            )
+        }
+        nativeFirstFrameTimeoutTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: task)
     }
 
     private func activateWarmPublisherInBackground(baseURL: URL, slot: Int, sequence: Int) {
@@ -1201,10 +1410,13 @@ final class StreamViewController: UIViewController {
     }
 
     private func resetWHEPClients() {
+        nativeFirstFrameTimeoutTask?.cancel()
+        nativeFirstFrameTimeoutTask = nil
         whepClients.values.forEach { $0.stop() }
         whepClients.removeAll()
-        singleWHEPClient?.stop()
+        let nativeClient = singleWHEPClient
         singleWHEPClient = nil
+        nativeClient?.stop()
         activeWHEPSlot = nil
         pendingWHEPSlot = nil
         pendingRenderedSlot = nil
@@ -1230,6 +1442,7 @@ final class StreamViewController: UIViewController {
         let selectedMetric = network.selectedEffectiveMetric.map(String.init) ?? "--"
         let usbCanWin = network.usbSharingCanWin == true ? "YES" : "NO"
         sourceLabel.text = "SRC \(logical) | WGC \(capture) | OUT \(response.profile.encoded.w)x\(response.profile.encoded.h) | \(response.encoder)\nETH \(selectedAlias) m=\(selectedMetric) | USB-WIN \(usbCanWin) | DEFAULT \(defaultRoute) | PICO \(lastInputBackend)"
+        targetLabel.text = "TARGET \(response.profile.encoded.w)x\(response.profile.encoded.h) / \(response.profile.fps) FPS / \(response.profile.bitrateKbps) KBPS / SWITCH < 1000 MS"
     }
 
     private func refreshStreamControls() {

@@ -102,7 +102,7 @@ final class StreamAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(StreamViewerRequest(state: state, slot: slot))
-        request.timeoutInterval = 4
+        request.timeoutInterval = 1.5
         session.dataTask(with: request) { data, response, error in
             if let error {
                 completion?(.failure(error))
