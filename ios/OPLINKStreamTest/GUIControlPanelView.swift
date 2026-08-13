@@ -240,11 +240,6 @@ final class GUIControlPanelView: UIView {
     }
 
     private func buildModulesColumn(closeButton: UIButton) -> UIView {
-        let moduleHeader = UIStackView(arrangedSubviews: [UIView(), closeButton])
-        moduleHeader.axis = .horizontal
-        moduleHeader.alignment = .center
-        moduleHeader.spacing = 0
-
         let chainGrid = UIStackView()
         chainGrid.axis = .vertical
         chainGrid.spacing = 5
@@ -277,13 +272,6 @@ final class GUIControlPanelView: UIView {
         let stop = compactTextButton("全止", color: UIColor(red: 0.8, green: 0.15, blue: 0.14, alpha: 1))
         stop.addTarget(self, action: #selector(stopAllTapped), for: .touchUpInside)
 
-        statusLabel.text = "等待 GUI_TEST_PC 狀態"
-        statusLabel.textColor = UIColor.white.withAlphaComponent(0.78)
-        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        statusLabel.numberOfLines = 1
-        statusLabel.adjustsFontSizeToFitWidth = true
-        statusLabel.minimumScaleFactor = 0.72
-
         let modulesTitle = UILabel()
         modulesTitle.text = "模組"
         modulesTitle.textColor = UIColor.white.withAlphaComponent(0.92)
@@ -307,23 +295,22 @@ final class GUIControlPanelView: UIView {
 
         let moduleContent = UIStackView(arrangedSubviews: [
             modulesTitle,
-            modulesScroll,
-            statusLabel
+            modulesScroll
         ])
         moduleContent.axis = .vertical
         moduleContent.spacing = 5
 
-        let actionRail = UIStackView(arrangedSubviews: [UIView(), play, clear, stop])
+        let actionRail = UIStackView(arrangedSubviews: [UIView(), play, clear, stop, closeButton])
         actionRail.axis = .vertical
         actionRail.spacing = 5
-        actionRail.alignment = .fill
+        actionRail.alignment = .center
 
         let contentRow = UIStackView(arrangedSubviews: [moduleContent, actionRail])
         contentRow.axis = .horizontal
         contentRow.spacing = 6
         contentRow.alignment = .fill
 
-        let stack = UIStackView(arrangedSubviews: [moduleHeader, chainGrid, contentRow])
+        let stack = UIStackView(arrangedSubviews: [chainGrid, contentRow])
         stack.axis = .vertical
         stack.spacing = 5
         return stack
@@ -421,11 +408,12 @@ final class GUIControlPanelView: UIView {
 
         populateModuleGroups(
             in: quickModuleGroupsStack,
-            columns: 8,
+            columns: 5,
             buttonHeight: 28,
             fontSize: 10,
-            fixedButtonWidth: 44,
-            singleLine: true
+            fixedButtonWidth: nil,
+            singleLine: true,
+            groupsPerRow: 2
         )
         populateModuleGroups(
             in: moduleGroupsStack,
@@ -443,8 +431,10 @@ final class GUIControlPanelView: UIView {
         buttonHeight: CGFloat,
         fontSize: CGFloat,
         fixedButtonWidth: CGFloat?,
-        singleLine: Bool
+        singleLine: Bool,
+        groupsPerRow: Int = 1
     ) {
+        var groupViews: [UIView] = []
         for group in moduleGroups {
             let label = UILabel()
             label.text = group.name
@@ -493,7 +483,26 @@ final class GUIControlPanelView: UIView {
             let groupStack = UIStackView(arrangedSubviews: [label, grid])
             groupStack.axis = .vertical
             groupStack.spacing = 4
-            container.addArrangedSubview(groupStack)
+            groupViews.append(groupStack)
+        }
+
+        let rowSize = max(1, groupsPerRow)
+        for start in stride(from: 0, to: groupViews.count, by: rowSize) {
+            if rowSize == 1 {
+                container.addArrangedSubview(groupViews[start])
+                continue
+            }
+
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.spacing = 8
+            row.alignment = .top
+            row.distribution = .fillEqually
+            for offset in 0..<rowSize {
+                let index = start + offset
+                row.addArrangedSubview(groupViews.indices.contains(index) ? groupViews[index] : UIView())
+            }
+            container.addArrangedSubview(row)
         }
     }
 
