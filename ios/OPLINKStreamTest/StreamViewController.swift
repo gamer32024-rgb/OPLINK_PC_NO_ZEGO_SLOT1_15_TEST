@@ -94,6 +94,7 @@ final class StreamViewController: UIViewController {
     private var bridgeModules: [String: [String]] = [:]
     private var bridgeModuleGroups: [GUIModuleGroup] = []
     private var bridgeModulePresets: [GUIModuleChainPreset] = []
+    private var bridgePlaybackAutomations: [GUIPlaybackAutomation] = []
     private var bridgeHeartbeatFresh = false
     private var suppressTouchSequenceForControlCollapse = false
     private var controlCenterXConstraint: NSLayoutConstraint?
@@ -686,6 +687,18 @@ final class StreamViewController: UIViewController {
         guiPanel.onClose = { [weak self] in self?.guiPanel.isHidden = true }
         guiPanel.onRefresh = { [weak self] in self?.refreshGUIBridgeState() }
         guiPanel.onPlay = { [weak self] slots, modules in self?.sendModuleChain(slots: slots, modules: modules) }
+        guiPanel.onCreateScheduled = { [weak self] slots, modules, date in
+            self?.sendScheduledPlayback(slots: slots, modules: modules, date: date)
+        }
+        guiPanel.onStartLoop = { [weak self] slots, modules, repeatCount, cooldownSeconds in
+            self?.sendLoopPlayback(
+                slots: slots,
+                modules: modules,
+                repeatCount: repeatCount,
+                cooldownSeconds: cooldownSeconds
+            )
+        }
+        guiPanel.onCancelAutomation = { [weak self] id in self?.sendCancelAutomation(id: id) }
         guiPanel.onStopAll = { [weak self] in self?.sendStopAll() }
         guiPanel.onStopSlot = { [weak self] slot in self?.sendStopSlot(slot) }
         guiPanel.onLauncher = { [weak self] action, slots in self?.sendLauncher(action: action, slots: slots) }
@@ -1636,6 +1649,7 @@ final class StreamViewController: UIViewController {
                     self.bridgeHeartbeatRunningSlots = Set(heartbeat?.runningSlots ?? [])
                     self.bridgePlayingSlots = Set(heartbeat?.playingSlots ?? [])
                     self.bridgeSlotPlaybackStatus = heartbeat?.slotPlaybackStatus ?? [:]
+                    self.bridgePlaybackAutomations = (heartbeat?.playbackAutomations ?? []).filter(\.isActive)
                     self.applyGUIBridgeState()
                     if response.executionOwner != "GUI_TEST_PC" || heartbeat?.executionOwner != "GUI_TEST_PC" {
                         self.guiPanel.setStatus("拒絕：bridge execution owner 不是 GUI_TEST_PC。", good: false)
@@ -1658,6 +1672,7 @@ final class StreamViewController: UIViewController {
             modules: bridgeModules,
             groups: bridgeModuleGroups,
             presets: bridgeModulePresets,
+            playbackAutomations: bridgePlaybackAutomations,
             heartbeatFresh: bridgeHeartbeatFresh
         )
     }
@@ -1713,6 +1728,52 @@ final class StreamViewController: UIViewController {
         guard let baseURL = configuredBaseURL() else { return }
         guiAPI.playModuleChain(baseURL: baseURL, slots: slots, modules: modules) { [weak self] result in
             self?.handleBridgeResult(result, success: "模組串列已交給 GUI_TEST_PC")
+        }
+    }
+
+    private func sendScheduledPlayback(slots: [Int], modules: [String], date: Date) {
+        guard let baseURL = configuredBaseURL() else { return }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Taipei")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+        let request = GUIPlaybackAutomationRequest(
+            mode: "scheduled_once",
+            slots: slots,
+            modules: modules,
+            cooldownSeconds: nil,
+            repeatCount: nil,
+            runAt: formatter.string(from: date)
+        )
+        guiAPI.createPlaybackAutomation(baseURL: baseURL, request: request) { [weak self] result in
+            self?.handleBridgeResult(result, success: "定時播放已建立")
+        }
+    }
+
+    private func sendLoopPlayback(
+        slots: [Int],
+        modules: [String],
+        repeatCount: Int?,
+        cooldownSeconds: Int
+    ) {
+        guard let baseURL = configuredBaseURL() else { return }
+        let request = GUIPlaybackAutomationRequest(
+            mode: "loop",
+            slots: slots,
+            modules: modules,
+            cooldownSeconds: cooldownSeconds,
+            repeatCount: repeatCount,
+            runAt: nil
+        )
+        guiAPI.createPlaybackAutomation(baseURL: baseURL, request: request) { [weak self] result in
+            self?.handleBridgeResult(result, success: "循環播放已建立")
+        }
+    }
+
+    private func sendCancelAutomation(id: String) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.cancelPlaybackAutomation(baseURL: baseURL, id: id) { [weak self] result in
+            self?.handleBridgeResult(result, success: "等待中的定時播放已刪除")
         }
     }
 

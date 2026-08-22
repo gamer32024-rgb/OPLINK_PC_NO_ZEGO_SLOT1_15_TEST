@@ -62,6 +62,30 @@ final class GUIBridgeAPI {
         )
     }
 
+    func createPlaybackAutomation(
+        baseURL: URL,
+        request: GUIPlaybackAutomationRequest,
+        completion: @escaping (Result<GUIBridgeResponse, Error>) -> Void
+    ) {
+        post(
+            GUIBridgeEndpoint.playbackAutomation(base: baseURL),
+            body: request,
+            completion: completion
+        )
+    }
+
+    func cancelPlaybackAutomation(
+        baseURL: URL,
+        id: String,
+        completion: @escaping (Result<GUIBridgeResponse, Error>) -> Void
+    ) {
+        post(
+            GUIBridgeEndpoint.cancelPlaybackAutomation(base: baseURL),
+            body: GUIPlaybackAutomationCancelRequest(id: id),
+            completion: completion
+        )
+    }
+
     func stopSlot(
         baseURL: URL,
         slot: Int,
