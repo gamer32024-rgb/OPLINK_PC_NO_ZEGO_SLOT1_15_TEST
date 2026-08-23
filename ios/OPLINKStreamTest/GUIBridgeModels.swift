@@ -59,6 +59,8 @@ struct GUIHeartbeat: Decodable {
     let runningSlots: [Int]
     let playingSlots: [Int]
     let slotPlaybackStatus: [String: String]
+    let slotCurrentModule: [String: String]
+    let picoActivitySlot: Int?
     let launcherBusy: Bool?
     let executionOwner: String?
     let playbackAutomations: [GUIPlaybackAutomation]
@@ -69,6 +71,8 @@ struct GUIHeartbeat: Decodable {
         case runningSlots = "running_slots"
         case playingSlots = "playing_slots"
         case slotPlaybackStatus = "slot_playback_status"
+        case slotCurrentModule = "slot_current_module"
+        case picoActivitySlot = "pico_activity_slot"
         case launcherBusy = "launcher_busy"
         case executionOwner = "execution_owner"
         case playbackAutomations = "playback_automations"
@@ -81,6 +85,8 @@ struct GUIHeartbeat: Decodable {
         runningSlots = try values.decodeIfPresent([Int].self, forKey: .runningSlots) ?? []
         playingSlots = try values.decodeIfPresent([Int].self, forKey: .playingSlots) ?? []
         slotPlaybackStatus = try values.decodeIfPresent([String: String].self, forKey: .slotPlaybackStatus) ?? [:]
+        slotCurrentModule = try values.decodeIfPresent([String: String].self, forKey: .slotCurrentModule) ?? [:]
+        picoActivitySlot = try values.decodeIfPresent(Int.self, forKey: .picoActivitySlot)
         launcherBusy = try values.decodeIfPresent(Bool.self, forKey: .launcherBusy)
         executionOwner = try values.decodeIfPresent(String.self, forKey: .executionOwner)
         playbackAutomations = try values.decodeIfPresent(

@@ -37,6 +37,8 @@ final class GUIControlPanelView: UIView {
     private var playingSlots = Set<Int>()
     private var selectedSlots = Set<Int>()
     private var slotPlaybackStatus: [String: String] = [:]
+    private var slotCurrentModule: [String: String] = [:]
+    private var picoActivitySlot: Int?
     private var moduleNames: [String] = []
     private var moduleGroups: [GUIModuleGroup] = []
     private var moduleGroupSignature: [String]?
@@ -92,6 +94,8 @@ final class GUIControlPanelView: UIView {
         runningSlots: Set<Int>,
         playingSlots: Set<Int>,
         slotPlaybackStatus: [String: String],
+        slotCurrentModule: [String: String],
+        picoActivitySlot: Int?,
         modules: [String: [String]],
         groups: [GUIModuleGroup],
         presets: [GUIModuleChainPreset],
@@ -101,6 +105,8 @@ final class GUIControlPanelView: UIView {
         self.runningSlots = runningSlots
         self.playingSlots = playingSlots
         self.slotPlaybackStatus = slotPlaybackStatus
+        self.slotCurrentModule = slotCurrentModule
+        self.picoActivitySlot = picoActivitySlot
         self.presets = normalizedPresets(presets)
         self.playbackAutomations = playbackAutomations.filter(\.isActive)
 
@@ -219,6 +225,9 @@ final class GUIControlPanelView: UIView {
                 button.tag = slot
                 button.setTitle(String(format: "%02d", slot), for: .normal)
                 button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
+                button.titleLabel?.adjustsFontSizeToFitWidth = true
+                button.titleLabel?.minimumScaleFactor = 0.35
+                button.titleLabel?.lineBreakMode = .byTruncatingTail
                 button.layer.cornerRadius = 8
                 button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
                 button.heightAnchor.constraint(equalToConstant: 31).isActive = true
@@ -855,6 +864,16 @@ final class GUIControlPanelView: UIView {
                 $0.status == "running" && $0.slots.contains(slot)
             }
             let selected = selectedSlots.contains(slot)
+            let moduleName = displayedModuleName(for: slot)
+            if let moduleName {
+                button.setTitle(moduleName, for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)，\(moduleName)"
+            } else {
+                button.setTitle(String(format: "%02d", slot), for: .normal)
+                button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)"
+            }
             if loop != nil {
                 button.backgroundColor = UIColor(red: 0.82, green: 0.28, blue: 0.08, alpha: 1)
                 button.setTitleColor(.white, for: .normal)
@@ -869,12 +888,48 @@ final class GUIControlPanelView: UIView {
                 button.setTitleColor(.white, for: .normal)
             }
             button.alpha = running || selected || playing || loop != nil ? 1 : 0.93
+            updatePicoActivityAnimation(for: button, active: picoActivitySlot == slot)
             button.accessibilityHint = loop != nil
                 ? "循環播放有效，點擊中止整個循環工作"
                 : (playing
                 ? slotPlaybackStatus[String(slot)] ?? "播放中，點擊只中止此槽"
                 : (running ? "在線" : "離線")
                 )
+        }
+    }
+
+    private func displayedModuleName(for slot: Int) -> String? {
+        if playingSlots.contains(slot),
+           let current = slotCurrentModule[String(slot)]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !current.isEmpty {
+            return current
+        }
+        let jobs = playbackAutomations.filter { $0.isActive && $0.slots.contains(slot) }
+        let job = jobs.sorted {
+            ($0.runAt ?? $0.nextRunAt ?? .greatestFiniteMagnitude)
+                < ($1.runAt ?? $1.nextRunAt ?? .greatestFiniteMagnitude)
+        }.first
+        if let module = job?.modules.first, !module.isEmpty { return module }
+        if let script = job?.script, !script.isEmpty {
+            return URL(fileURLWithPath: script).deletingPathExtension().lastPathComponent
+        }
+        return nil
+    }
+
+    private func updatePicoActivityAnimation(for button: UIButton, active: Bool) {
+        let key = "oplink.pico.activity"
+        if active {
+            guard button.layer.animation(forKey: key) == nil else { return }
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1.0
+            pulse.toValue = 0.55
+            pulse.duration = 0.8
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            button.layer.add(pulse, forKey: key)
+        } else {
+            button.layer.removeAnimation(forKey: key)
         }
     }
 

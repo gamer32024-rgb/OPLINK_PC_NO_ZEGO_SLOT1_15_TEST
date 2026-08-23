@@ -91,6 +91,8 @@ final class StreamViewController: UIViewController {
     private var bridgeHeartbeatRunningSlots = Set<Int>()
     private var bridgePlayingSlots = Set<Int>()
     private var bridgeSlotPlaybackStatus: [String: String] = [:]
+    private var bridgeSlotCurrentModule: [String: String] = [:]
+    private var bridgePicoActivitySlot: Int?
     private var bridgeModules: [String: [String]] = [:]
     private var bridgeModuleGroups: [GUIModuleGroup] = []
     private var bridgeModulePresets: [GUIModuleChainPreset] = []
@@ -129,7 +131,7 @@ final class StreamViewController: UIViewController {
             repeats: true
         )
         bridgeTimer = Timer.scheduledTimer(
-            timeInterval: 3,
+            timeInterval: 0.5,
             target: self,
             selector: #selector(periodicBridgeRefresh),
             userInfo: nil,
@@ -1579,8 +1581,8 @@ final class StreamViewController: UIViewController {
     }
 
     @objc private func periodicBridgeRefresh() {
-        guard configuredBaseURL() != nil else { return }
-        refreshGUIBridgeState()
+        guard !guiPanel.isHidden, let baseURL = configuredBaseURL() else { return }
+        refreshGUIBridgeHeartbeat(baseURL: baseURL)
     }
 
     private func refreshGUIBridgeState() {
@@ -1639,6 +1641,10 @@ final class StreamViewController: UIViewController {
             }
         }
 
+        refreshGUIBridgeHeartbeat(baseURL: baseURL)
+    }
+
+    private func refreshGUIBridgeHeartbeat(baseURL: URL) {
         guiAPI.fetchJobs(baseURL: baseURL) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -1649,6 +1655,8 @@ final class StreamViewController: UIViewController {
                     self.bridgeHeartbeatRunningSlots = Set(heartbeat?.runningSlots ?? [])
                     self.bridgePlayingSlots = Set(heartbeat?.playingSlots ?? [])
                     self.bridgeSlotPlaybackStatus = heartbeat?.slotPlaybackStatus ?? [:]
+                    self.bridgeSlotCurrentModule = heartbeat?.slotCurrentModule ?? [:]
+                    self.bridgePicoActivitySlot = heartbeat?.picoActivitySlot
                     self.bridgePlaybackAutomations = (heartbeat?.playbackAutomations ?? []).filter(\.isActive)
                     self.applyGUIBridgeState()
                     if response.executionOwner != "GUI_TEST_PC" || heartbeat?.executionOwner != "GUI_TEST_PC" {
@@ -1669,6 +1677,8 @@ final class StreamViewController: UIViewController {
             runningSlots: running,
             playingSlots: bridgePlayingSlots,
             slotPlaybackStatus: bridgeSlotPlaybackStatus,
+            slotCurrentModule: bridgeSlotCurrentModule,
+            picoActivitySlot: bridgePicoActivitySlot,
             modules: bridgeModules,
             groups: bridgeModuleGroups,
             presets: bridgeModulePresets,
