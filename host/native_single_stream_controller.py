@@ -17,6 +17,7 @@ from native_capture_router_process import (
     NativeCaptureRouterProcess,
     RouterSwitchResult,
 )
+from slot_limits import MAX_SLOT, MIN_SLOT
 
 
 class NativeSingleStreamError(RuntimeError):
@@ -389,8 +390,10 @@ class NativeSingleStreamController:
             self.state_path.unlink(missing_ok=True)
 
     def _validate_slot(self, slot: int) -> dict[str, object]:
-        if slot < 1 or slot > 15:
-            raise NativeSingleStreamError("slot must be between 1 and 15")
+        if slot < MIN_SLOT or slot > MAX_SLOT:
+            raise NativeSingleStreamError(
+                f"slot must be between {MIN_SLOT} and {MAX_SLOT}"
+            )
         identity = self.identity_provider(slot)
         if not identity.get("ok"):
             raise NativeSingleStreamError(

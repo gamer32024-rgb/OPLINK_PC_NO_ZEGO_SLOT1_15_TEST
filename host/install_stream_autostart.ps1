@@ -50,4 +50,4 @@ if ($StartNow) {
 }
 
 Write-Host "Installed post-logon OPLINK 720p native stream autostart: $ShortcutPath"
-Write-Host "The watchdog waits for GUI_TEST_PC and all 15 game windows, then keeps only native_single 5112 ready."
+Write-Host "The watchdog waits for GUI_TEST_PC and at least one game window, then keeps native_single 5112 ready for Slots 1-20."

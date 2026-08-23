@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [int[]]$Slots = @(1..15),
+    [int[]]$Slots = @(1..20),
     [ValidateSet("720p", "1080p")]
     [string]$Profile = "1080p",
     [ValidateRange(256, 3840)]
@@ -184,10 +184,10 @@ function Get-PhysicalUnderlayGate {
     }
 }
 
-$expectedSlots = @(1..15)
+$expectedSlots = @(1..20)
 $normalizedSlots = @($Slots | Sort-Object -Unique)
 if (($normalizedSlots -join ",") -ne ($expectedSlots -join ",")) {
-    throw "This build requires the complete source set: -Slots 1,2,...,15"
+    throw "This build requires the complete source set: -Slots 1,2,...,20"
 }
 $Slots = $normalizedSlots
 if (!(Test-Path -LiteralPath $TemplatePath)) { throw "Missing MediaMTX template: $TemplatePath" }
@@ -283,9 +283,28 @@ if ($customOutputWidth) {
     $profileWidth = if ($Profile -eq "1080p") { 1920 } else { 1280 }
     $profileHeight = if ($Profile -eq "1080p") { 1080 } else { 720 }
 }
-$layoutSlots = if ($nativeProfileDefaults) { @($Slots) } else { @(1..15) }
-if (!$layoutSlots -or ($layoutSlots | Where-Object { $_ -lt 1 -or $_ -gt 15 })) {
-    throw "Layout slots must contain values from 1 through 15."
+$initialIdentities = @()
+foreach ($slot in $Slots) {
+    $probeText = & $Python $ServerScript --probe $slot
+    if ($LASTEXITCODE -ne 0) { throw "Could not probe slot $slot." }
+    $identity = $probeText | ConvertFrom-Json
+    if ($identity.ok) {
+        $initialIdentities += $identity
+    } elseif (!$nativeProfileDefaults) {
+        throw "Slot $slot is not ready: $($identity.error)"
+    }
+}
+if (!$initialIdentities) {
+    throw "No running StarCG source is available for stream startup."
+}
+
+$layoutSlots = if ($nativeProfileDefaults) {
+    @($initialIdentities | ForEach-Object { [int]$_.slot })
+} else {
+    @($Slots)
+}
+if (!$layoutSlots -or ($layoutSlots | Where-Object { $_ -lt 1 -or $_ -gt 20 })) {
+    throw "Layout slots must contain values from 1 through 20."
 }
 $layoutSlots = @($layoutSlots | Sort-Object -Unique)
 $slotArgument = ($Slots | Sort-Object -Unique) -join ","
@@ -301,14 +320,14 @@ if ($StreamMode -eq "native_single") {
 $layoutRepairText = @(& $Python $ServerScript @layoutArguments 2>&1)
 if ($LASTEXITCODE -ne 0) {
     $layoutRepairError = ($layoutRepairText | ForEach-Object { $_.ToString() }) -join "`n"
-    throw "Could not refresh and validate the 15 game render surfaces: $layoutRepairError"
+    throw "Could not refresh and validate the running game render surfaces: $layoutRepairError"
 }
 $layoutRepair = $layoutRepairText | ConvertFrom-Json
 if (!$layoutRepair.ok -or [int]$layoutRepair.slots_refreshed -ne $layoutSlots.Count) {
     throw "The $StreamMode stream layout preflight did not refresh the requested slots."
 }
 $identities = @()
-foreach ($slot in $Slots) {
+foreach ($slot in $layoutSlots) {
     $probeText = & $Python $ServerScript --probe $slot
     if ($LASTEXITCODE -ne 0) { throw "Could not probe slot $slot." }
     $identity = $probeText | ConvertFrom-Json
@@ -352,7 +371,7 @@ if ($inputMode -eq "disabled") {
 
 $selectedEncoder = $Encoder
 if ($Encoder -eq "auto" -or $Encoder -eq "nvenc") {
-    $probeIdentity = $identities | Where-Object slot -eq 1 | Select-Object -First 1
+    $probeIdentity = $identities | Select-Object -First 1
     $probeFilter = "gfxcapture=hwnd=$($probeIdentity.hwnd):capture_cursor=0:capture_border=0:max_framerate=${Fps}:resize_mode=scale"
     $nvencProbeLog = Join-Path $Runtime "nvenc_probe.err.log"
     $savedErrorActionPreference = $ErrorActionPreference
@@ -371,7 +390,7 @@ if ($Encoder -eq "auto" -or $Encoder -eq "nvenc") {
     }
 }
 if ($selectedEncoder -eq "mf") {
-    $probeIdentity = $identities | Where-Object slot -eq 1 | Select-Object -First 1
+    $probeIdentity = $identities | Select-Object -First 1
     $probeFilter = "gfxcapture=hwnd=$($probeIdentity.hwnd):capture_cursor=0:capture_border=0:max_framerate=${Fps}:resize_mode=scale"
     $mfProbeLog = Join-Path $Runtime "mf_probe.err.log"
     $savedErrorActionPreference = $ErrorActionPreference
@@ -507,18 +526,23 @@ try {
         if ($process.HasExited) { throw "A test process exited during startup. Check host/runtime logs." }
     }
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/health" -TimeoutSec 5
-    if (!$health.all_sources_ready) { throw "The metadata service reports that a source is no longer ready." }
+    $readyHealthSlots = @($health.sources | Where-Object { $_.ok } | ForEach-Object { [int]$_.slot })
+    $missingRunningSlots = @($layoutSlots | Where-Object { $_ -notin $readyHealthSlots })
+    if ($missingRunningSlots) {
+        throw "The metadata service lost running source Slots: $($missingRunningSlots -join ',')."
+    }
+    $activationSlot = [int]($identities | Select-Object -First 1).slot
     $activation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$ApiPort/api/v1/activate" `
-        -ContentType "application/json" -Body (@{ slot = 1 } | ConvertTo-Json -Compress) -TimeoutSec 8
-    if (!$activation.publisher_alive -or [int]$activation.active_slot -ne 1) {
-        throw "The $StreamMode publisher did not activate slot 1."
+        -ContentType "application/json" -Body (@{ slot = $activationSlot } | ConvertTo-Json -Compress) -TimeoutSec 8
+    if (!$activation.publisher_alive -or [int]$activation.active_slot -ne $activationSlot) {
+        throw "The $StreamMode publisher did not activate slot $activationSlot."
     }
 
     Write-Host "OPLINK_PC slots $slotArgument no-ZEGO test is ready."
     if ($StreamMode -eq "native_single") {
-        Write-Host "Publisher: native single path oplink_active | router=$($activation.router_pid) encoder=$($activation.encoder_pid) | active slot 1 | activation=$($activation.activation_ms)ms"
+        Write-Host "Publisher: native single path oplink_active | router=$($activation.router_pid) encoder=$($activation.encoder_pid) | active slot $activationSlot | activation=$($activation.activation_ms)ms"
     } else {
-        Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot 1 | activation=$($activation.activation_ms)ms"
+        Write-Host "Publisher: warm cache $PublisherCacheSize slots | active slot $activationSlot | activation=$($activation.activation_ms)ms"
     }
     Write-Host "Encoder: $selectedEncoder | Output: ${profileWidth}x${profileHeight}@$Fps | Bitrate: ${BitrateKbps} kbps"
     Write-Host "Render surfaces: $($layoutRepair.slots_refreshed)/$($layoutSlots.Count) refreshed at $($layoutRepair.client_width)x$($layoutRepair.client_height) client"

@@ -97,8 +97,8 @@ def main() -> int:
     args = parser.parse_args()
 
     slots = list(dict.fromkeys(args.slots))
-    if not slots or any(slot < 1 or slot > 15 for slot in slots):
-        parser.error("--slots must contain values from 1 through 15")
+    if not slots or any(slot < 1 or slot > 20 for slot in slots):
+        parser.error("--slots must contain values from 1 through 20")
     if args.cycles <= 0:
         parser.error("--cycles must be positive")
     router_exe = args.router.resolve()

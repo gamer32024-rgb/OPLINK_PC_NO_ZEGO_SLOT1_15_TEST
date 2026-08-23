@@ -12,6 +12,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import BinaryIO
 
+from slot_limits import MAX_SLOT, MIN_SLOT
+
 
 class NativeCaptureRouterError(RuntimeError):
     pass
@@ -124,15 +126,19 @@ def parse_router_event(line: str) -> dict[str, object]:
     elif event == "switch_started":
         _require_int(payload, "generation", minimum=1)
         slot = _require_int(payload, "slot", minimum=1)
-        if slot > 15:
-            raise RouterProtocolError("router event slot must be between 1 and 15")
+        if slot > MAX_SLOT:
+            raise RouterProtocolError(
+                f"router event slot must be between {MIN_SLOT} and {MAX_SLOT}"
+            )
         _parse_hwnd(payload.get("hwnd"))
         _require_int(payload, "at_ms", minimum=1)
     elif event == "first_frame":
         _require_int(payload, "generation", minimum=1)
         slot = _require_int(payload, "slot", minimum=1)
-        if slot > 15:
-            raise RouterProtocolError("router event slot must be between 1 and 15")
+        if slot > MAX_SLOT:
+            raise RouterProtocolError(
+                f"router event slot must be between {MIN_SLOT} and {MAX_SLOT}"
+            )
         for field in ("source_w", "source_h", "output_w", "output_h"):
             _require_int(payload, field, minimum=1)
         _require_number(payload, "elapsed_ms", minimum=0.0)
@@ -145,8 +151,10 @@ def parse_router_event(line: str) -> dict[str, object]:
     elif event == "frame_stats":
         _require_int(payload, "generation", minimum=1)
         slot = _require_int(payload, "slot", minimum=1)
-        if slot > 15:
-            raise RouterProtocolError("router event slot must be between 1 and 15")
+        if slot > MAX_SLOT:
+            raise RouterProtocolError(
+                f"router event slot must be between {MIN_SLOT} and {MAX_SLOT}"
+            )
         _require_number(payload, "fps", minimum=0.0)
         _require_int(payload, "dropped", minimum=0)
     elif event == "error":
@@ -154,8 +162,10 @@ def parse_router_event(line: str) -> dict[str, object]:
             _require_int(payload, "generation", minimum=0)
         if "slot" in payload:
             slot = _require_int(payload, "slot", minimum=0)
-            if slot > 15:
-                raise RouterProtocolError("router event slot must be between 1 and 15")
+            if slot > MAX_SLOT:
+                raise RouterProtocolError(
+                    f"router event slot must be between {MIN_SLOT} and {MAX_SLOT}"
+                )
         if not isinstance(payload.get("code"), str) or not payload["code"]:
             raise RouterProtocolError("router error event requires a code")
         if not isinstance(payload.get("recoverable"), bool):
@@ -183,10 +193,10 @@ def format_switch_command(*, generation: int, slot: int, hwnd: int) -> str:
     if (
         isinstance(slot, bool)
         or not isinstance(slot, int)
-        or slot < 1
-        or slot > 15
+        or slot < MIN_SLOT
+        or slot > MAX_SLOT
     ):
-        raise ValueError("slot must be between 1 and 15")
+        raise ValueError(f"slot must be between {MIN_SLOT} and {MAX_SLOT}")
     if isinstance(hwnd, bool) or not isinstance(hwnd, int) or hwnd <= 0:
         raise ValueError("HWND must be a positive integer")
     return (

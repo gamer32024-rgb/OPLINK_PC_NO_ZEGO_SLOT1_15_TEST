@@ -15,7 +15,7 @@ final class GUIControlPanelView: UIView {
 
     private let card = UIView()
     private let statusLabel = UILabel()
-    private let slotButtons = (1...15).map { _ in UIButton(type: .system) }
+    private let slotButtons = OPLINKSlots.range.map { _ in UIButton(type: .system) }
     private let chainButtons = (0..<10).map { _ in UIButton(type: .system) }
     private let presetButtons = (0..<20).map { _ in UIButton(type: .system) }
     private let moduleChooser = UIView()
@@ -79,7 +79,7 @@ final class GUIControlPanelView: UIView {
     }
 
     func prepareForPresentation(streamSlot: Int) {
-        selectedSlots = (1...15).contains(streamSlot) ? [streamSlot] : []
+        selectedSlots = OPLINKSlots.range.contains(streamSlot) ? [streamSlot] : []
         activePresetIndex = nil
         moduleChooser.isHidden = true
         automationSheet.isHidden = true
@@ -208,7 +208,7 @@ final class GUIControlPanelView: UIView {
         slotGrid.axis = .vertical
         slotGrid.spacing = 5
         slotGrid.distribution = .fillEqually
-        for rowIndex in 0..<3 {
+        for rowIndex in 0..<4 {
             let row = UIStackView()
             row.axis = .horizontal
             row.spacing = 5
@@ -231,6 +231,10 @@ final class GUIControlPanelView: UIView {
         startAll.addTarget(self, action: #selector(startAllTapped), for: .touchUpInside)
         let closeAll = compactTextButton("全關", color: UIColor(red: 0.63, green: 0.21, blue: 0.16, alpha: 1))
         closeAll.addTarget(self, action: #selector(closeAllTapped), for: .touchUpInside)
+        let startSelected = compactTextButton("開選", color: UIColor(red: 0.08, green: 0.48, blue: 0.55, alpha: 1))
+        startSelected.addTarget(self, action: #selector(startSelectedTapped), for: .touchUpInside)
+        let closeSelected = compactTextButton("關選", color: UIColor(red: 0.63, green: 0.21, blue: 0.16, alpha: 1))
+        closeSelected.addTarget(self, action: #selector(closeSelectedTapped), for: .touchUpInside)
 
         let scheduledSettings = textButton(
             "定時設定",
@@ -261,7 +265,7 @@ final class GUIControlPanelView: UIView {
 
         let stack = UIStackView(arrangedSubviews: [
             slotGrid,
-            compactActionRow([startAll, closeAll]),
+            compactActionRow([startAll, closeAll, startSelected, closeSelected]),
             buildChainGrid(),
             automationRow
         ])
@@ -656,7 +660,7 @@ final class GUIControlPanelView: UIView {
         clearStack(automationSheetContent)
         clearStack(automationSheetActions)
         automationSheetContent.addArrangedSubview(automationLogRow(slot: "Slot", scheduled: "定時播放", loop: "循環播放", header: true))
-        for slot in 1...15 {
+        for slot in OPLINKSlots.range {
             let scheduled = playbackAutomations
                 .filter { $0.mode == "scheduled_once" && ["waiting", "running"].contains($0.status) && $0.slots.contains(slot) }
                 .sorted { ($0.runAt ?? 0) < ($1.runAt ?? 0) }
@@ -1090,7 +1094,7 @@ final class GUIControlPanelView: UIView {
     }
 
     @objc private func selectAllTapped() {
-        selectedSlots = Set(1...15)
+        selectedSlots = Set(OPLINKSlots.range)
         refreshSlotButtons()
     }
 
@@ -1308,7 +1312,7 @@ final class GUIControlPanelView: UIView {
     }
 
     @objc private func stopAllTapped() { onStopAll?() }
-    @objc private func startAllTapped() { onLauncher?("start-missing", Array(1...15)) }
+    @objc private func startAllTapped() { onLauncher?("start-missing", OPLINKSlots.all) }
 
     @objc private func startSelectedTapped() {
         guard let slots = requireSelectedSlots() else { return }
@@ -1320,7 +1324,7 @@ final class GUIControlPanelView: UIView {
         onLauncher?("stop", slots)
     }
 
-    @objc private func closeAllTapped() { onLauncher?("stop", Array(1...15)) }
+    @objc private func closeAllTapped() { onLauncher?("stop", OPLINKSlots.all) }
 
     @objc private func arrangeTapped() {
         let slots = runningSlots.sorted()

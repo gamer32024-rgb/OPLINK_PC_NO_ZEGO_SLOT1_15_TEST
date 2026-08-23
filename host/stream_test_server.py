@@ -21,6 +21,7 @@ from native_single_stream_controller import (
     NativeSingleStreamController,
     NativeSingleStreamError,
 )
+from slot_limits import MAX_SLOT, MIN_SLOT, slot_range
 from overview_stream_controller import OverviewStreamController, OverviewStreamError
 from pico_stream_input import PicoStreamInputController, PicoStreamInputError
 
@@ -97,7 +98,7 @@ def _slot_pid_map() -> dict[int, dict[str, object]]:
             pid = int((value or {}).get("Pid") or (value or {}).get("pid") or 0)
         except (TypeError, ValueError, AttributeError):
             continue
-        if 1 <= slot <= 15 and pid > 0:
+        if MIN_SLOT <= slot <= MAX_SLOT and pid > 0:
             result[pid] = {
                 "slot": slot,
                 "expected_exe": str((value or {}).get("Exe") or ""),
@@ -342,7 +343,7 @@ def repair_stream_layout(
         raise RuntimeError(f"stream layout hard-rule validation failed: {invalid}")
     return {
         "ok": True,
-        "policy": f"starcg_stacked_{client_width}x{client_height}_pico_v1",
+        "policy": f"starcg_stacked_{client_width}x{client_height}_pico_v2",
         "client_width": client_width,
         "client_height": client_height,
         "outer_width": outer_width,
@@ -912,7 +913,7 @@ class StreamPublisherController:
 
 
 class Handler(BaseHTTPRequestHandler):
-    slots = list(range(1, 16))
+    slots = list(slot_range())
     input_token = ""
     input_controller: PicoStreamInputController | None = None
     input_relay: GuiTestPcInputRelay | None = None
@@ -943,7 +944,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/api/v1/health"):
             payload = self._sources_payload()
             payload["input"] = self._input_status()
-            payload["service"] = "oplink-pc-no-zego-slots-1-15"
+            payload["service"] = "oplink-pc-no-zego-slots-1-20"
             payload["all_sources_ready"] = all(item["ok"] for item in payload["sources"])
             payload.update(self._stream_metadata())
             self._json(payload)
@@ -992,7 +993,7 @@ class Handler(BaseHTTPRequestHandler):
         sources.append(
             {
                 "ok": overview_ready,
-                "slot": 16,
+                "slot": MAX_SLOT + 1,
                 "title": "15-SLOT OVERVIEW",
                 "client_logical": {"w": HARD_CLIENT_WIDTH, "h": HARD_CLIENT_HEIGHT},
                 "capture_physical_expected": {
@@ -1070,12 +1071,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json_body()
                 slot = int(payload.get("slot") or 0)
-                allowed_slots = [*self.slots, 16] if self.overview_controller else self.slots
+                allowed_slots = (
+                    [*self.slots, MAX_SLOT + 1]
+                    if self.overview_controller
+                    else self.slots
+                )
                 if slot not in allowed_slots:
                     raise ValueError(f"slot must be one of {allowed_slots}")
-                if slot == 16:
-                    if self.overview_controller is None:
-                        raise ValueError("overview stream is disabled")
+                if self.overview_controller is not None and slot == MAX_SLOT + 1:
                     self._json(self.overview_controller.activate())
                 else:
                     if self.overview_controller is not None:
@@ -1130,7 +1133,11 @@ class Handler(BaseHTTPRequestHandler):
                 state = str(payload.get("state") or "").strip().lower()
                 raw_slot = payload.get("slot")
                 slot = int(raw_slot) if raw_slot is not None else None
-                allowed_slots = [*self.slots, 16] if self.overview_controller else self.slots
+                allowed_slots = (
+                    [*self.slots, MAX_SLOT + 1]
+                    if self.overview_controller
+                    else self.slots
+                )
                 if slot is not None and slot not in allowed_slots:
                     raise ValueError(f"slot must be one of {allowed_slots}")
                 if self.overview_controller is not None:
@@ -1171,10 +1178,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OPLINK_PC slots 1-15 stream service")
+    parser = argparse.ArgumentParser(
+        description=f"OPLINK_PC slots {MIN_SLOT}-{MAX_SLOT} stream service"
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5110)
-    parser.add_argument("--slots", default=",".join(str(slot) for slot in range(1, 16)))
+    parser.add_argument("--slots", default=",".join(str(slot) for slot in slot_range()))
     parser.add_argument("--probe", type=int)
     parser.add_argument("--repair-stream-layout", action="store_true")
     parser.add_argument("--client-width", type=int, default=HARD_CLIENT_WIDTH)

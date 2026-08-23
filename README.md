@@ -1,6 +1,6 @@
-# OPLINK_PC No-ZEGO Slots 1-15 Test
+# OPLINK_PC No-ZEGO Slots 1-20 Test
 
-This native iOS proof of concept streams Windows game `.EXE` slots 1 through 15 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, CPU screenshots, or desktop-region capture.
+This native iOS proof of concept streams Windows game `.EXE` slots 1 through 20 over WebRTC on a private Tailscale network. It does not use ZEGO, browser playback, CPU screenshots, or desktop-region capture.
 
 The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The phone only submits bridge commands. `GUI_TEST_PC` remains the sole owner of module execution, foreground-window scheduling, Pico HID output, cancellation, and launcher actions.
 
@@ -8,8 +8,8 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 
 | Item | Rule |
 |---|---|
-| Selectable sources | Exact verified HWNDs for slots 1 through 15 |
-| Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[15]` title fallback |
+| Selectable sources | Exact verified HWNDs for slots 1 through 20 |
+| Identity | GUI_TEST_PC launcher PID map, with `[01]` through `[20]` title fallback |
 | Capture | Native Windows Graphics Capture/D3D11 router by exact HWND; occluded windows remain observable |
 | Current source geometry | `853x480` logical at 150% DPI, producing a `1280x720` physical client capture |
 | Publisher | One on-demand H.264 stream at the fixed MediaMTX path `oplink_active` |
@@ -20,7 +20,7 @@ The iOS app also exposes the existing `GUI_TEST_PC` mobile-PWA controls. The pho
 | Input target | iPhone-to-HID round trip below 300 ms through authenticated live-touch relay |
 | Control owner | `GUI_TEST_PC`; iOS calls only the stream input relay and `/gui-test-pc/api/...` bridge endpoints |
 
-The host exposes all 15 source identities but runs only one capture router, one encoder, and one WHEP stream. Before showing a slot, iOS calls `POST /oplink-test/api/v1/activate`; Windows switches the existing router to that slot's verified HWND without rebuilding the MediaMTX path. Slots 1 through 15 therefore do not use adjacent-slot warm streams.
+The host exposes all 20 source identities but runs only one capture router, one encoder, and one WHEP stream. Before showing a slot, iOS calls `POST /oplink-test/api/v1/activate`; Windows switches the existing router to that slot's verified HWND without rebuilding the MediaMTX path. Slots 1 through 20 therefore do not use adjacent-slot warm streams.
 
 The iOS app sends a viewer heartbeat every three seconds while foregrounded. It keeps the WHEP peer for at most one second after entering the background, allowing a very short app switch to resume immediately without continuously spending mobile data. After that grace it deletes the WHEP session. If no viewer remains for 15 seconds, Windows stops the router and encoder. Foreground recovery retries failed activation/WHEP requests and replaces a stale peer when a new first frame does not arrive.
 
@@ -32,7 +32,7 @@ Host-side HWND switching does not prove the complete phone-visible delay. Accept
 
 Prerequisites:
 
-- All 15 game windows are running and registered in the GUI_TEST_PC PID map.
+- At least one game window is running and registered in the GUI_TEST_PC PID map; the API keeps all Slots 1-20 addressable as they are opened or closed.
 - Every source is 16:9 and accepted by the active GUI_TEST_PC layout policy.
 - The input pairing token is retained across normal host restarts. Use `-RotateInputToken` only when intentionally invalidating paired clients.
 - Tailscale is connected on Windows and iPhone.
@@ -78,7 +78,7 @@ cd host
 .\install_stream_autostart.ps1 -StartNow
 ```
 
-The watchdog never launches GUI_TEST_PC or game windows. It waits for you to open GUI_TEST_PC and start all 15 slots manually, then starts the 720p/30 fps native-single host with Tailscale Serve. It checks both the `5112` API and MediaMTX API continuously and restarts only the verified stream-host processes after an unexpected exit. The existing GUI_TEST_PC launcher remains the sole owner of the per-launch NetBind and multi-instance bypass sequence.
+The watchdog never launches GUI_TEST_PC or game windows. It waits for GUI_TEST_PC and at least one running Slot, then starts the 720p/30 fps native-single host with Tailscale Serve. The health API continues to expose Slots 1-20, marking closed Slots unavailable until GUI_TEST_PC opens them. It checks both the `5112` API and MediaMTX API continuously and restarts only the verified stream-host processes after an unexpected exit. The existing GUI_TEST_PC launcher remains the sole owner of the per-launch NetBind and multi-instance bypass sequence.
 
 The Startup shortcut is `OPLINK_PC Stream Host.lnk`. Diagnostics are written to `host/runtime/autostart.log`. Remove persistence with:
 

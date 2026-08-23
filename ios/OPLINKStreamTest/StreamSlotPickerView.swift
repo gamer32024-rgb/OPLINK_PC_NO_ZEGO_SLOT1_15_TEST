@@ -7,7 +7,7 @@ final class StreamSlotPickerView: UIVisualEffectView {
     private let stack = UIStackView()
     private var buttons: [UIButton] = []
     private var selectedSlot = 1
-    private var availableSlots = Set(1...15)
+    private var availableSlots = Set(OPLINKSlots.range)
 
     override init(effect: UIVisualEffect?) {
         super.init(effect: effect ?? UIBlurEffect(style: .systemThinMaterialDark))
@@ -51,7 +51,7 @@ final class StreamSlotPickerView: UIVisualEffectView {
             stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -20)
         ])
 
-        for slot in 1...15 {
+        for slot in OPLINKSlots.range {
             let button = UIButton(type: .system)
             button.tag = slot
             button.setTitle(String(format: "%02d", slot), for: .normal)

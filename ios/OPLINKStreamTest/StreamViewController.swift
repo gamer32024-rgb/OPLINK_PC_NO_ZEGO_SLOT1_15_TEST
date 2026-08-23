@@ -64,7 +64,7 @@ final class StreamViewController: UIViewController {
     private var connectionSequence = 0
     private var switchStartedAt: Date?
     private var latestResponse: StreamSourcesResponse?
-    private var availableStreamSlots = Set<Int>(1...15)
+    private var availableStreamSlots = Set(OPLINKSlots.range)
     private var renderedSize = CGSize.zero
     private var renderedFPS = 0
     private var lastSwitchMilliseconds: Int?
@@ -944,7 +944,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func connect(slot: Int, automaticRetry: Bool = false) {
-        guard (1...15).contains(slot) else { return }
+        guard OPLINKSlots.range.contains(slot) else { return }
         guard let baseURL = configuredBaseURL() else {
             presentHostSettings()
             return
@@ -1014,7 +1014,7 @@ final class StreamViewController: UIViewController {
                 case .success(let response):
                     self.latestResponse = response
                     self.availableStreamSlots = Set(
-                        response.sources.filter { $0.ok && (1...15).contains($0.slot) }.map(\.slot)
+                        response.sources.filter { $0.ok && OPLINKSlots.range.contains($0.slot) }.map(\.slot)
                     )
                     self.refreshStreamControls()
                     guard let source = response.sources.first(where: { $0.slot == slot }), source.ok else {
@@ -1377,7 +1377,7 @@ final class StreamViewController: UIViewController {
     }
 
     private func adjacentAvailableSlot(from origin: Int, step: Int) -> Int {
-        let ordered = availableStreamSlots.filter { (1...15).contains($0) }.sorted()
+        let ordered = availableStreamSlots.filter { OPLINKSlots.range.contains($0) }.sorted()
         guard !ordered.isEmpty else { return origin }
         guard let originIndex = ordered.firstIndex(of: origin) else {
             return step < 0 ? ordered.last! : ordered.first!

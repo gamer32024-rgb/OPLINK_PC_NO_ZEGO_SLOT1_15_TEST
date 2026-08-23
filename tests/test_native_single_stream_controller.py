@@ -12,7 +12,10 @@ if str(HOST) not in sys.path:
     sys.path.insert(0, str(HOST))
 
 from native_capture_router_process import RouterSwitchResult  # noqa: E402
-from native_single_stream_controller import NativeSingleStreamController  # noqa: E402
+from native_single_stream_controller import (  # noqa: E402
+    NativeSingleStreamController,
+    NativeSingleStreamError,
+)
 
 
 class NativeSingleStreamControllerTests(unittest.TestCase):
@@ -104,8 +107,8 @@ class NativeSingleStreamControllerTests(unittest.TestCase):
         finally:
             controller.stop()
 
-    def test_slots_1_7_15_reuse_one_router_and_encoder_pid(self) -> None:
-        results = [self.controller.activate(slot) for slot in (1, 7, 15)]
+    def test_slots_1_7_20_reuse_one_router_and_encoder_pid(self) -> None:
+        results = [self.controller.activate(slot) for slot in (1, 7, 20)]
 
         self.assertEqual(
             [result["router_pid"] for result in results],
@@ -123,9 +126,16 @@ class NativeSingleStreamControllerTests(unittest.TestCase):
         self.assertEqual(len(self.router_factory.calls), 1)
         self.assertEqual(
             [(call["slot"], call["hwnd"]) for call in self.router.switch_calls],
-            [(1, 0x101), (7, 0x707), (15, 0xF0F)],
+            [(1, 0x101), (7, 0x707), (20, 0x1414)],
         )
         self.assertEqual(self.router.stop_reasons, [])
+
+    def test_slot_above_twenty_is_rejected_before_pipeline_start(self) -> None:
+        with self.assertRaisesRegex(NativeSingleStreamError, "between 1 and 20"):
+            self.controller.activate(21)
+
+        self.assertEqual(self.popen_factory.calls, [])
+        self.assertEqual(self.router_factory.calls, [])
 
     def test_activate_returns_native_switch_contract(self) -> None:
         result = self.controller.activate(7)
@@ -156,10 +166,10 @@ class NativeSingleStreamControllerTests(unittest.TestCase):
     def test_prewarm_is_a_noop_for_the_existing_pipeline(self) -> None:
         activated = self.controller.activate(1)
 
-        result = self.controller.prewarm([1, 7, 15, 7])
+        result = self.controller.prewarm([1, 7, 20, 7])
 
         self.assertFalse(result["prewarm_supported"])
-        self.assertEqual(result["requested_slots"], [1, 7, 15])
+        self.assertEqual(result["requested_slots"], [1, 7, 20])
         self.assertEqual(result["router_pid"], activated["router_pid"])
         self.assertEqual(result["encoder_pid"], activated["encoder_pid"])
         self.assertEqual(len(self.popen_factory.calls), 1)

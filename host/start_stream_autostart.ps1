@@ -17,7 +17,6 @@ $mutex = [System.Threading.Mutex]::new($false, "Local\OPLINK_PC_Native_Single_Au
 $hasMutex = $false
 $lastState = $null
 $exitCode = 0
-$gameSetWasIncomplete = $true
 
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 
@@ -78,8 +77,8 @@ function Test-StreamHost {
         [int]$health.profile.encoded.h -eq 720 -and
         [int]$health.profile.fps -eq 30 -and
         [int]$health.profile.bitrate_kbps -eq $ExpectedBitrateKbps -and
-        $sourceSlots.Count -eq 15 -and
-        @($sourceSlots | Where-Object { $_ -lt 1 -or $_ -gt 15 }).Count -eq 0 -and
+        $sourceSlots.Count -eq 20 -and
+        @($sourceSlots | Where-Object { $_ -lt 1 -or $_ -gt 20 }).Count -eq 0 -and
         $null -ne $media
 }
 
@@ -91,7 +90,7 @@ function Get-ReadyGameSlotCount {
         return 0
     }
     $ready = 0
-    foreach ($slot in 1..15) {
+    foreach ($slot in 1..20) {
         $property = $slotMap.PSObject.Properties | Where-Object Name -eq ([string]$slot) | Select-Object -First 1
         if (!$property -or !$property.Value.Pid) { continue }
         $pidValue = [int]$property.Value.Pid
@@ -150,21 +149,19 @@ try {
                 $exitCode = 2
             } else {
                 $readySlots = Get-ReadyGameSlotCount
-                if ($readySlots -lt 15) {
-                    $gameSetWasIncomplete = $true
-                    Set-WatchdogState "WAITING_GAME_WINDOWS" "$readySlots/15 registered StarCG processes are ready; start the remaining slots manually from GUI_TEST_PC."
+                if ($readySlots -lt 1) {
+                    Set-WatchdogState "WAITING_GAME_WINDOWS" "No registered StarCG process is ready; start at least one Slot from GUI_TEST_PC."
                     $exitCode = 3
-                } elseif ($streamReady -and !$gameSetWasIncomplete) {
-                    Set-WatchdogState "READY" "GUI_TEST_PC, 15/15 game windows, native API 5112, MediaMTX, one WHEP source, and Tailscale Serve 8443 are ready."
+                } elseif ($streamReady) {
+                    Set-WatchdogState "READY" "GUI_TEST_PC, $readySlots/20 game windows, native API 5112, MediaMTX, one WHEP source, and Tailscale Serve 8443 are ready."
                     $exitCode = 0
                 } else {
-                    Set-WatchdogState "STARTING_STREAM_HOST" "15/15 game windows are ready; refreshing layout and starting the stream host."
+                    Set-WatchdogState "STARTING_STREAM_HOST" "$readySlots/20 game windows are ready; refreshing their layout and starting the stream host."
                     Start-OplinkStreamHost -BitrateKbps $configuredBitrateKbps
                     if (!(Test-StreamHost -ExpectedBitrateKbps $configuredBitrateKbps)) {
                         throw "Stream host did not pass local API and MediaMTX readiness checks."
                     }
-                    $gameSetWasIncomplete = $false
-                    Set-WatchdogState "READY" "Stream host started successfully at $configuredBitrateKbps kbps."
+                    Set-WatchdogState "READY" "Stream host started successfully for $readySlots/20 running Slots at $configuredBitrateKbps kbps."
                     $exitCode = 0
                 }
             }

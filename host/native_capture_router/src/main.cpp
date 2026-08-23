@@ -48,7 +48,7 @@ using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
 namespace {
 
 constexpr int kMinimumSlot = 1;
-constexpr int kMaximumSlot = 15;
+constexpr int kMaximumSlot = 20;
 constexpr size_t kStagingTextureCount = 3;
 constexpr int kGeometryTolerancePixels = 8;
 
@@ -442,7 +442,7 @@ public:
             throw RouterError("INVALID_GENERATION", "generation must be greater than zero");
         }
         if (slot < kMinimumSlot || slot > kMaximumSlot) {
-            throw RouterError("INVALID_SLOT", "slot is outside 1..15");
+            throw RouterError("INVALID_SLOT", "slot is outside 1..20");
         }
 
         {

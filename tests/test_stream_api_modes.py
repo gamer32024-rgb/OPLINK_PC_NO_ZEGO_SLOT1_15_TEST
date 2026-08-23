@@ -55,8 +55,9 @@ class StreamAPIModeTests(unittest.TestCase):
     def test_native_activate_failure_is_service_unavailable(self) -> None:
         handler = Handler.__new__(Handler)
         handler.path = "/api/v1/activate"
-        handler.slots = list(range(1, 16))
+        handler.slots = list(range(1, 21))
         handler.publisher_controller = FailingNativeController()
+        handler.overview_controller = None
         handler._read_json_body = lambda: {"slot": 7}
         responses: list[tuple[dict[str, object], HTTPStatus]] = []
         handler._json = lambda payload, status=HTTPStatus.OK: responses.append(
@@ -74,6 +75,9 @@ class StreamAPIModeTests(unittest.TestCase):
                 )
             ],
         )
+
+    def test_default_source_slots_cover_one_through_twenty(self) -> None:
+        self.assertEqual(Handler.slots, list(range(1, 21)))
 
 
 class FakeController:

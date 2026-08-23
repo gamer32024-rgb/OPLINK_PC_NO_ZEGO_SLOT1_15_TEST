@@ -38,6 +38,10 @@ class NativeCaptureRouterProtocolTests(unittest.TestCase):
             "SWITCH generation=42 slot=7 hwnd=0x0000000001234567",
         )
         self.assertEqual(
+            format_switch_command(generation=43, slot=20, hwnd=0x1414),
+            "SWITCH generation=43 slot=20 hwnd=0x0000000000001414",
+        )
+        self.assertEqual(
             format_stop_command("viewer_idle"),
             "STOP reason=viewer_idle",
         )
@@ -45,6 +49,16 @@ class NativeCaptureRouterProtocolTests(unittest.TestCase):
     def test_rejects_malformed_event_json(self) -> None:
         with self.assertRaisesRegex(RouterProtocolError, "malformed JSON"):
             parse_router_event("{not-json")
+
+    def test_rejects_slot_above_twenty(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 1 and 20"):
+            format_switch_command(generation=1, slot=21, hwnd=0x1515)
+
+        with self.assertRaisesRegex(RouterProtocolError, "between 1 and 20"):
+            parse_router_event(
+                '{"event":"switch_started","generation":1,"slot":21,'
+                '"hwnd":"0x1515","at_ms":1000}'
+            )
 
 
 class NativeCaptureRouterProcessTests(unittest.TestCase):
