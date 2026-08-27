@@ -12,6 +12,7 @@ final class GUIControlPanelView: UIView {
     var onLauncher: ((String, [Int]) -> Void)?
     var onArrange: (([Int]) -> Void)?
     var onRequestPresetSave: ((Int, String, [String]) -> Void)?
+    var onRestartController: (() -> Void)?
 
     private let card = UIView()
     private let statusLabel = UILabel()
@@ -32,8 +33,14 @@ final class GUIControlPanelView: UIView {
     private let loopCooldownField = UITextField()
     private let scheduledSecondField = UITextField()
     private let scheduledDatePicker = UIDatePicker()
+    private let restartControllerButton = UIButton(type: .system)
+    private weak var playActionButton: UIButton?
 
     private var runningSlots = Set<Int>()
+    private var queuedOpeningSlots = Set<Int>()
+    private var openingSlots = Set<Int>()
+    private var closingSlots = Set<Int>()
+    private var restartingSlots = Set<Int>()
     private var playingSlots = Set<Int>()
     private var selectedSlots = Set<Int>()
     private var slotPlaybackStatus: [String: String] = [:]
@@ -50,6 +57,8 @@ final class GUIControlPanelView: UIView {
     private var automationSheetMode: String?
     private var pendingScheduledSlots: [Int] = []
     private var pendingScheduledModules: [String] = []
+    private var pendingSubmissionSlots = Set<Int>()
+    private var heartbeatFresh = false
 
     private enum ChainInsertionMode: Equatable {
         case head
@@ -81,7 +90,7 @@ final class GUIControlPanelView: UIView {
     }
 
     func prepareForPresentation(streamSlot: Int) {
-        selectedSlots = OPLINKSlots.range.contains(streamSlot) ? [streamSlot] : []
+        updateStreamSlot(streamSlot)
         activePresetIndex = nil
         moduleChooser.isHidden = true
         automationSheet.isHidden = true
@@ -90,8 +99,22 @@ final class GUIControlPanelView: UIView {
         refreshChainButtons()
     }
 
+    func updateStreamSlot(_ streamSlot: Int) {
+        guard OPLINKSlots.range.contains(streamSlot), !unavailableSlots.contains(streamSlot) else {
+            selectedSlots.removeAll()
+            refreshSlotButtons()
+            return
+        }
+        selectedSlots = [streamSlot]
+        refreshSlotButtons()
+    }
+
     func apply(
         runningSlots: Set<Int>,
+        queuedOpeningSlots: Set<Int>,
+        openingSlots: Set<Int>,
+        closingSlots: Set<Int>,
+        restartingSlots: Set<Int>,
         playingSlots: Set<Int>,
         slotPlaybackStatus: [String: String],
         slotCurrentModule: [String: String],
@@ -103,12 +126,19 @@ final class GUIControlPanelView: UIView {
         heartbeatFresh: Bool
     ) {
         self.runningSlots = runningSlots
+        self.queuedOpeningSlots = queuedOpeningSlots
+        self.openingSlots = openingSlots
+        self.closingSlots = closingSlots
+        self.restartingSlots = restartingSlots
         self.playingSlots = playingSlots
         self.slotPlaybackStatus = slotPlaybackStatus
         self.slotCurrentModule = slotCurrentModule
         self.picoActivitySlot = picoActivitySlot
         self.presets = normalizedPresets(presets)
         self.playbackAutomations = playbackAutomations.filter(\.isActive)
+        self.heartbeatFresh = heartbeatFresh
+        selectedSlots.subtract(unavailableSlots)
+        restartControllerButton.isHidden = heartbeatFresh
 
         let available = Set(modules.keys)
         var orderedGroups: [GUIModuleGroup] = []
@@ -162,6 +192,30 @@ final class GUIControlPanelView: UIView {
             : UIColor(red: 1, green: 0.48, blue: 0.4, alpha: 1)
     }
 
+    func finishPlaybackSubmission(
+        requestedSlots: [Int],
+        acceptedSlots: [Int],
+        skippedSlots: [Int],
+        error: String?
+    ) {
+        pendingSubmissionSlots.subtract(requestedSlots)
+        if let error {
+            let restorable = Set(requestedSlots).subtracting(unavailableSlots)
+            selectedSlots.formUnion(restorable)
+            setStatus(error, good: false)
+        } else {
+            selectedSlots.subtract(acceptedSlots)
+            let acceptedText = acceptedSlots.map(String.init).joined(separator: ",")
+            if skippedSlots.isEmpty {
+                setStatus("已送出 Slot \(acceptedText)", good: true)
+            } else {
+                let skippedText = skippedSlots.map(String.init).joined(separator: ",")
+                setStatus("已送出 Slot \(acceptedText)；Slot \(skippedText) 忙碌，已略過", good: true)
+            }
+        }
+        refreshSlotButtons()
+    }
+
     private func build() {
         backgroundColor = .clear
 
@@ -183,12 +237,29 @@ final class GUIControlPanelView: UIView {
         body.distribution = .fill
         slotsColumn.widthAnchor.constraint(equalTo: body.widthAnchor, multiplier: 0.35).isActive = true
 
-        let mainStack = UIStackView(arrangedSubviews: [body])
+        statusLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        statusLabel.numberOfLines = 2
+        statusLabel.text = "選擇 Slot 與模組後播放"
+        statusLabel.textColor = UIColor.white.withAlphaComponent(0.82)
+        restartControllerButton.setTitle("重啟控制器", for: .normal)
+        restartControllerButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
+        restartControllerButton.setTitleColor(.white, for: .normal)
+        restartControllerButton.backgroundColor = UIColor(red: 0.78, green: 0.18, blue: 0.16, alpha: 1)
+        restartControllerButton.layer.cornerRadius = 7
+        restartControllerButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        restartControllerButton.isHidden = true
+        restartControllerButton.addTarget(self, action: #selector(restartControllerTapped), for: .touchUpInside)
+        let statusRow = UIStackView(arrangedSubviews: [statusLabel, restartControllerButton])
+        statusRow.axis = .horizontal
+        statusRow.spacing = 8
+        statusRow.alignment = .center
+        let mainStack = UIStackView(arrangedSubviews: [statusRow, body])
         mainStack.axis = .vertical
+        mainStack.spacing = 6
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mainStack)
 
-        let preferredHeight = card.heightAnchor.constraint(equalToConstant: 390)
+        let preferredHeight = card.heightAnchor.constraint(equalToConstant: 420)
         preferredHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
             card.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
@@ -227,7 +298,9 @@ final class GUIControlPanelView: UIView {
                 button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
                 button.titleLabel?.adjustsFontSizeToFitWidth = true
                 button.titleLabel?.minimumScaleFactor = 0.35
-                button.titleLabel?.lineBreakMode = .byTruncatingTail
+                button.titleLabel?.numberOfLines = 2
+                button.titleLabel?.textAlignment = .center
+                button.titleLabel?.lineBreakMode = .byWordWrapping
                 button.layer.cornerRadius = 8
                 button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
                 button.heightAnchor.constraint(equalToConstant: 31).isActive = true
@@ -275,7 +348,7 @@ final class GUIControlPanelView: UIView {
         let stack = UIStackView(arrangedSubviews: [
             slotGrid,
             compactActionRow([startAll, closeAll, startSelected, closeSelected]),
-            buildChainGrid(),
+            buildPresetGrid(),
             automationRow
         ])
         stack.axis = .vertical
@@ -288,6 +361,7 @@ final class GUIControlPanelView: UIView {
         timed.setTitleColor(UIColor(red: 0.12, green: 0.09, blue: 0.01, alpha: 1), for: .normal)
         timed.addTarget(self, action: #selector(scheduledPlayTapped), for: .touchUpInside)
         let play = compactTextButton("播放", color: UIColor(red: 0.08, green: 0.62, blue: 0.32, alpha: 1))
+        playActionButton = play
         play.addTarget(self, action: #selector(playTapped), for: .touchUpInside)
         let clear = compactTextButton("清除", color: UIColor(white: 0.32, alpha: 1))
         clear.addTarget(self, action: #selector(clearChainTapped), for: .touchUpInside)
@@ -310,7 +384,7 @@ final class GUIControlPanelView: UIView {
             quickModuleGroupsStack.widthAnchor.constraint(equalTo: modulesScroll.frameLayoutGuide.widthAnchor)
         ])
 
-        let moduleContent = UIStackView(arrangedSubviews: [modulesScroll, buildPresetGrid()])
+        let moduleContent = UIStackView(arrangedSubviews: [buildChainGrid(), modulesScroll])
         moduleContent.axis = .vertical
         moduleContent.spacing = 5
 
@@ -748,9 +822,9 @@ final class GUIControlPanelView: UIView {
 
         populateModuleGroups(
             in: quickModuleGroupsStack,
-            columns: 5,
-            buttonHeight: 28,
-            fontSize: 10,
+            columns: 4,
+            buttonHeight: 42,
+            fontSize: 15,
             fixedButtonWidth: nil,
             singleLine: true,
             groupsPerRow: 2
@@ -859,13 +933,35 @@ final class GUIControlPanelView: UIView {
         for button in slotButtons {
             let slot = button.tag
             let running = runningSlots.contains(slot)
+            let queuedOpening = queuedOpeningSlots.contains(slot)
+            let opening = openingSlots.contains(slot)
+            let closing = closingSlots.contains(slot)
+            let restarting = restartingSlots.contains(slot)
             let loop = activeLoop(for: slot)
+            let automation = activeAutomation(for: slot)
             let playing = playingSlots.contains(slot) || playbackAutomations.contains {
                 $0.status == "running" && $0.slots.contains(slot)
             }
+            let reserved = automation != nil || pendingSubmissionSlots.contains(slot)
             let selected = selectedSlots.contains(slot)
             let moduleName = displayedModuleName(for: slot)
-            if let moduleName {
+            if restarting {
+                button.setTitle(String(format: "%02d\n重啟", slot), for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)，正在重啟"
+            } else if closing {
+                button.setTitle(String(format: "%02d\n關閉", slot), for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)，正在關閉"
+            } else if opening {
+                button.setTitle(String(format: "%02d\n開啟", slot), for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)，正在開啟"
+            } else if queuedOpening {
+                button.setTitle(String(format: "%02d\n排隊", slot), for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+                button.accessibilityLabel = "Slot \(slot)，排隊開啟"
+            } else if let moduleName {
                 button.setTitle(moduleName, for: .normal)
                 button.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
                 button.accessibilityLabel = "Slot \(slot)，\(moduleName)"
@@ -874,11 +970,14 @@ final class GUIControlPanelView: UIView {
                 button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
                 button.accessibilityLabel = "Slot \(slot)"
             }
-            if loop != nil {
-                button.backgroundColor = UIColor(red: 0.82, green: 0.28, blue: 0.08, alpha: 1)
-                button.setTitleColor(.white, for: .normal)
-            } else if playing {
+            if playing {
                 button.backgroundColor = UIColor(red: 0.86, green: 0.12, blue: 0.12, alpha: 1)
+                button.setTitleColor(.white, for: .normal)
+            } else if opening || closing || restarting {
+                button.backgroundColor = UIColor(red: 0.86, green: 0.12, blue: 0.12, alpha: 1)
+                button.setTitleColor(.white, for: .normal)
+            } else if reserved || loop != nil || queuedOpening {
+                button.backgroundColor = UIColor(red: 0.64, green: 0.10, blue: 0.10, alpha: 1)
                 button.setTitleColor(.white, for: .normal)
             } else if selected {
                 button.backgroundColor = UIColor(red: 0.28, green: 0.84, blue: 0.42, alpha: 1)
@@ -887,14 +986,28 @@ final class GUIControlPanelView: UIView {
                 button.backgroundColor = UIColor(white: running ? 0.34 : 0.18, alpha: 1)
                 button.setTitleColor(.white, for: .normal)
             }
-            button.alpha = running || selected || playing || loop != nil ? 1 : 0.93
-            updatePicoActivityAnimation(for: button, active: picoActivitySlot == slot)
-            button.accessibilityHint = loop != nil
-                ? "循環播放有效，點擊中止整個循環工作"
-                : (playing
-                ? slotPlaybackStatus[String(slot)] ?? "播放中，點擊只中止此槽"
-                : (running ? "在線" : "離線")
-                )
+            button.alpha = running || selected || playing || reserved || opening || closing || restarting || queuedOpening || loop != nil ? 1 : 0.93
+            updatePicoActivityAnimation(
+                for: button,
+                active: playing || opening || closing || restarting || picoActivitySlot == slot
+            )
+            if restarting {
+                button.accessibilityHint = "遊戲視窗正在重啟，暫時不能選取"
+            } else if closing {
+                button.accessibilityHint = "遊戲視窗正在關閉，暫時不能選取"
+            } else if opening {
+                button.accessibilityHint = "遊戲視窗正在開啟，暫時不能選取"
+            } else if queuedOpening {
+                button.accessibilityHint = "已送出開啟命令，正在等待 GUI_TEST_PC 接收"
+            } else if loop != nil {
+                button.accessibilityHint = "循環播放有效，點擊中止整個循環工作"
+            } else if playing {
+                button.accessibilityHint = slotPlaybackStatus[String(slot)] ?? "播放中，點擊只中止此槽"
+            } else if reserved {
+                button.accessibilityHint = "已保留，不能建立第二個播放工作"
+            } else {
+                button.accessibilityHint = running ? "在線" : "離線"
+            }
         }
     }
 
@@ -935,6 +1048,24 @@ final class GUIControlPanelView: UIView {
 
     private func activeLoop(for slot: Int) -> GUIPlaybackAutomation? {
         playbackAutomations.first { $0.mode == "loop" && $0.isActive && $0.slots.contains(slot) }
+    }
+
+    private func activeAutomation(for slot: Int) -> GUIPlaybackAutomation? {
+        playbackAutomations.first { $0.isActive && $0.slots.contains(slot) }
+    }
+
+    private var unavailableSlots: Set<Int> {
+        let automated = playbackAutomations.reduce(into: Set<Int>()) { slots, automation in
+            guard automation.isActive else { return }
+            slots.formUnion(automation.slots)
+        }
+        return playingSlots
+            .union(automated)
+            .union(pendingSubmissionSlots)
+            .union(queuedOpeningSlots)
+            .union(openingSlots)
+            .union(closingSlots)
+            .union(restartingSlots)
     }
 
     private func refreshChainButtons() {
@@ -1065,10 +1196,19 @@ final class GUIControlPanelView: UIView {
     }
 
     private func requireSelectedSlots() -> [Int]? {
+        let skipped = selectedSlots.intersection(unavailableSlots).sorted()
+        selectedSlots.subtract(skipped)
         let slots = selectedSlots.sorted()
         if slots.isEmpty {
-            setStatus("請先選擇至少一個遊戲視窗。", good: false)
+            setStatus(
+                skipped.isEmpty ? "請先選擇至少一個遊戲視窗。" : "所選 Slot 已有工作，本次沒有送出。",
+                good: false
+            )
+            refreshSlotButtons()
             return nil
+        }
+        if !skipped.isEmpty {
+            setStatus("Slot \(skipped.map(String.init).joined(separator: ",")) 忙碌，已略過", good: false)
         }
         return slots
     }
@@ -1129,15 +1269,36 @@ final class GUIControlPanelView: UIView {
 
     @objc private func closeTapped() { onClose?() }
     @objc private func refreshTapped() { onRefresh?() }
+    @objc private func restartControllerTapped() {
+        restartControllerButton.isEnabled = false
+        setStatus("正在要求 PC 重啟 GUI_TEST_PC 控制器...", good: true)
+        onRestartController?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.restartControllerButton.isEnabled = true
+        }
+    }
 
     @objc private func slotTapped(_ sender: UIButton) {
         let slot = sender.tag
+        if openingSlots.contains(slot) || closingSlots.contains(slot) || restartingSlots.contains(slot) || queuedOpeningSlots.contains(slot) {
+            let status = restartingSlots.contains(slot)
+                ? "正在重啟"
+                : (closingSlots.contains(slot)
+                ? "正在關閉"
+                : (openingSlots.contains(slot) ? "正在開啟" : "正在排隊開啟"))
+            setStatus("GAME \(slot) \(status)，不能重複選取。", good: false)
+            return
+        }
         let automationRunning = playbackAutomations.contains {
             $0.status == "running" && $0.slots.contains(slot)
         }
         if playingSlots.contains(slot) || automationRunning || activeLoop(for: slot) != nil {
             setStatus("正在中止 GAME \(slot)...", good: true)
             onStopSlot?(slot)
+            return
+        }
+        if activeAutomation(for: slot) != nil || pendingSubmissionSlots.contains(slot) {
+            setStatus("GAME \(slot) 已有等待、定時或循環工作，不能再選取。", good: false)
             return
         }
         if selectedSlots.contains(slot) {
@@ -1149,7 +1310,7 @@ final class GUIControlPanelView: UIView {
     }
 
     @objc private func selectAllTapped() {
-        selectedSlots = Set(OPLINKSlots.range)
+        selectedSlots = Set(OPLINKSlots.range).subtracting(unavailableSlots)
         refreshSlotButtons()
     }
 
@@ -1289,7 +1450,7 @@ final class GUIControlPanelView: UIView {
 
     @objc private func playTapped() {
         guard let payload = selectedPlaybackPlan() else { return }
-        setStatus("正在把模組連串交給 GUI_TEST_PC...", good: true)
+        beginPlaybackSubmission(slots: payload.slots)
         onPlay?(payload.slots, payload.modules)
     }
 
@@ -1327,6 +1488,7 @@ final class GUIControlPanelView: UIView {
         let defaults = UserDefaults.standard
         let repeatCount = (defaults.object(forKey: LoopDefaults.repeatCount) as? NSNumber)?.intValue
         let cooldown = (defaults.object(forKey: LoopDefaults.cooldownSeconds) as? NSNumber)?.intValue ?? 30
+        beginPlaybackSubmission(slots: payload.slots)
         onStartLoop?(payload.slots, payload.modules, repeatCount, cooldown)
     }
 
@@ -1352,6 +1514,7 @@ final class GUIControlPanelView: UIView {
         let slots = pendingScheduledSlots
         let modules = pendingScheduledModules
         closeAutomationSheetTapped()
+        beginPlaybackSubmission(slots: slots)
         onCreateScheduled?(slots, modules, targetDate)
     }
 
@@ -1388,6 +1551,23 @@ final class GUIControlPanelView: UIView {
             return
         }
         onArrange?(slots)
+    }
+
+    private func beginPlaybackSubmission(slots: [Int]) {
+        pendingSubmissionSlots.formUnion(slots)
+        selectedSlots.subtract(slots)
+        setStatus("正在送出 Slot \(slots.map(String.init).joined(separator: ","))...", good: true)
+        refreshSlotButtons()
+        guard let button = playActionButton else { return }
+        UIView.animate(withDuration: 0.1, animations: {
+            button.transform = CGAffineTransform(scaleX: 0.86, y: 0.86)
+            button.alpha = 0.65
+        }) { _ in
+            UIView.animate(withDuration: 0.18) {
+                button.transform = .identity
+                button.alpha = 1
+            }
+        }
     }
 }
 

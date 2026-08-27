@@ -35,6 +35,28 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertNotIn("GUIAssetInventory", sources)
         self.assertNotIn("onRequestAssets", sources)
 
+    def test_launcher_progress_decodes_and_displays_all_action_states(self) -> None:
+        models = (ROOT / "ios/OPLINKStreamTest/GUIBridgeModels.swift").read_text(encoding="utf-8")
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        controller = (ROOT / "ios/OPLINKStreamTest/StreamViewController.swift").read_text(encoding="utf-8")
+
+        self.assertIn('case launcherAction = "launcher_action"', models)
+        self.assertIn('case launcherSlots = "launcher_slots"', models)
+        for label in ("排隊", "開啟", "關閉", "重啟"):
+            self.assertIn(label, panel)
+        self.assertIn("reportsOpening", controller)
+        self.assertIn("reportsClosing", controller)
+        self.assertIn("reportsRestarting", controller)
+
+    def test_module_layout_and_quick_buttons_match_updated_panel(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+
+        self.assertIn("UIStackView(arrangedSubviews: [buildChainGrid(), modulesScroll])", panel)
+        self.assertIn("buildPresetGrid(),\n            automationRow", panel)
+        self.assertIn("columns: 4", panel)
+        self.assertIn("buttonHeight: 42", panel)
+        self.assertIn("fontSize: 15", panel)
+
 
 if __name__ == "__main__":
     unittest.main()

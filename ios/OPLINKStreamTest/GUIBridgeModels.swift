@@ -46,10 +46,55 @@ struct GUIJobsResponse: Decodable {
     let jobs: [GUIBridgeJob]
     let gui: GUIHeartbeat?
     let executionOwner: String?
+    let controller: GUIControllerState?
 
     enum CodingKeys: String, CodingKey {
-        case jobs, gui
+        case jobs, gui, controller
         case executionOwner = "execution_owner"
+    }
+}
+
+struct GUIControllerState: Decodable {
+    let online: Bool
+    let heartbeatAgeSeconds: Double?
+    let heartbeatPID: Int?
+    let shutdownRequested: Bool?
+    let reservedSlots: [Int]
+    let watchdog: GUIControllerWatchdogState?
+
+    enum CodingKeys: String, CodingKey {
+        case online, watchdog
+        case heartbeatAgeSeconds = "heartbeat_age_seconds"
+        case heartbeatPID = "heartbeat_pid"
+        case shutdownRequested = "shutdown_requested"
+        case reservedSlots = "reserved_slots"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        online = try values.decodeIfPresent(Bool.self, forKey: .online) ?? false
+        heartbeatAgeSeconds = try values.decodeIfPresent(Double.self, forKey: .heartbeatAgeSeconds)
+        heartbeatPID = try values.decodeIfPresent(Int.self, forKey: .heartbeatPID)
+        shutdownRequested = try values.decodeIfPresent(Bool.self, forKey: .shutdownRequested)
+        reservedSlots = try values.decodeIfPresent([Int].self, forKey: .reservedSlots) ?? []
+        watchdog = try values.decodeIfPresent(GUIControllerWatchdogState.self, forKey: .watchdog)
+    }
+}
+
+struct GUIControllerWatchdogState: Decodable {
+    let enabled: Bool?
+    let restarting: Bool?
+    let lastRestartAt: String?
+    let lastReason: String?
+    let lastError: String?
+    let lastStartedPID: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, restarting
+        case lastRestartAt = "last_restart_at"
+        case lastReason = "last_reason"
+        case lastError = "last_error"
+        case lastStartedPID = "last_started_pid"
     }
 }
 
@@ -62,6 +107,8 @@ struct GUIHeartbeat: Decodable {
     let slotCurrentModule: [String: String]
     let picoActivitySlot: Int?
     let launcherBusy: Bool?
+    let launcherAction: String?
+    let launcherSlots: [Int]
     let executionOwner: String?
     let playbackAutomations: [GUIPlaybackAutomation]
 
@@ -74,6 +121,8 @@ struct GUIHeartbeat: Decodable {
         case slotCurrentModule = "slot_current_module"
         case picoActivitySlot = "pico_activity_slot"
         case launcherBusy = "launcher_busy"
+        case launcherAction = "launcher_action"
+        case launcherSlots = "launcher_slots"
         case executionOwner = "execution_owner"
         case playbackAutomations = "playback_automations"
     }
@@ -88,6 +137,8 @@ struct GUIHeartbeat: Decodable {
         slotCurrentModule = try values.decodeIfPresent([String: String].self, forKey: .slotCurrentModule) ?? [:]
         picoActivitySlot = try values.decodeIfPresent(Int.self, forKey: .picoActivitySlot)
         launcherBusy = try values.decodeIfPresent(Bool.self, forKey: .launcherBusy)
+        launcherAction = try values.decodeIfPresent(String.self, forKey: .launcherAction)
+        launcherSlots = try values.decodeIfPresent([Int].self, forKey: .launcherSlots) ?? []
         executionOwner = try values.decodeIfPresent(String.self, forKey: .executionOwner)
         playbackAutomations = try values.decodeIfPresent(
             [GUIPlaybackAutomation].self,
@@ -152,10 +203,17 @@ struct GUIBridgeResponse: Decodable {
     let relayedTo: String
     let job: GUIBridgeJob
     let gui: GUIHeartbeat?
+    let acceptedSlots: [Int]?
+    let skippedSlots: [Int]?
+    let skippedReasons: [String: String]?
+    let duplicate: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case ok, job, gui
+        case ok, job, gui, duplicate
         case relayedTo = "relayed_to"
+        case acceptedSlots = "accepted_slots"
+        case skippedSlots = "skipped_slots"
+        case skippedReasons = "skipped_reasons"
     }
 }
 
@@ -176,6 +234,12 @@ struct GUIBridgeJob: Decodable {
 struct GUIModuleChainRequest: Encodable {
     let slots: [Int]
     let modules: [String]
+    let requestID = UUID().uuidString
+
+    enum CodingKeys: String, CodingKey {
+        case slots, modules
+        case requestID = "request_id"
+    }
 }
 
 struct GUIPlaybackAutomationRequest: Encodable {
@@ -186,6 +250,7 @@ struct GUIPlaybackAutomationRequest: Encodable {
     let cooldownSeconds: Int?
     let repeatCount: Int?
     let runAt: String?
+    let requestID = UUID().uuidString
 
     enum CodingKeys: String, CodingKey {
         case mode, slots, modules
@@ -193,11 +258,18 @@ struct GUIPlaybackAutomationRequest: Encodable {
         case cooldownSeconds = "cooldown_seconds"
         case repeatCount = "repeat_count"
         case runAt = "run_at"
+        case requestID = "request_id"
     }
 }
 
 struct GUIPlaybackAutomationCancelRequest: Encodable {
     let id: String
+    let requestID = UUID().uuidString
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case requestID = "request_id"
+    }
 }
 
 struct GUIModuleChainPresetSaveRequest: Encodable {
@@ -207,25 +279,62 @@ struct GUIModuleChainPresetSaveRequest: Encodable {
 
 struct GUISlotRequest: Encodable {
     let slot: Int
+    let requestID = UUID().uuidString
+
+    enum CodingKeys: String, CodingKey {
+        case slot
+        case requestID = "request_id"
+    }
 }
 
 struct GUILauncherRequest: Encodable {
     let slots: [Int]
     let forcebindMode = "netbind"
     let useWindowsUsers = true
+    let requestID = UUID().uuidString
 
     enum CodingKeys: String, CodingKey {
         case slots
         case forcebindMode = "forcebind_mode"
         case useWindowsUsers = "use_windows_users"
+        case requestID = "request_id"
     }
 }
 
 struct GUILayoutRequest: Encodable {
     let slots: [Int]
+    let requestID = UUID().uuidString
+
+    enum CodingKeys: String, CodingKey {
+        case slots
+        case requestID = "request_id"
+    }
 }
 
-struct GUIEmptyRequest: Encodable {}
+struct GUIEmptyRequest: Encodable {
+    let requestID = UUID().uuidString
+
+    enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
+    }
+}
+
+struct GUIControllerRestartResponse: Decodable {
+    let ok: Bool
+    let controller: GUIControllerRestartState
+}
+
+struct GUIControllerRestartState: Decodable {
+    let accepted: Bool?
+    let message: String?
+    let restarting: Bool?
+    let lastError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accepted, message, restarting
+        case lastError = "last_error"
+    }
+}
 
 enum GUIBridgeEndpoint {
     static func targets(base: URL) -> URL {
@@ -278,5 +387,9 @@ enum GUIBridgeEndpoint {
 
     static func ensureLayout(base: URL) -> URL {
         StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/starcg/layout/ensure")
+    }
+
+    static func restartController(base: URL) -> URL {
+        StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/controller/restart")
     }
 }

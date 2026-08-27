@@ -119,6 +119,17 @@ final class GUIBridgeAPI {
         post(GUIBridgeEndpoint.ensureLayout(base: baseURL), body: GUILayoutRequest(slots: slots), completion: completion)
     }
 
+    func restartController(
+        baseURL: URL,
+        completion: @escaping (Result<GUIControllerRestartResponse, Error>) -> Void
+    ) {
+        post(
+            GUIBridgeEndpoint.restartController(base: baseURL),
+            body: GUIEmptyRequest(),
+            completion: completion
+        )
+    }
+
     private func get<Response: Decodable>(
         _ url: URL,
         completion: @escaping (Result<Response, Error>) -> Void

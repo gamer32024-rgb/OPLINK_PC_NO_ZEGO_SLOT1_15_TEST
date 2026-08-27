@@ -89,6 +89,11 @@ final class StreamViewController: UIViewController {
 
     private var bridgeTargetRunningSlots = Set<Int>()
     private var bridgeHeartbeatRunningSlots = Set<Int>()
+    private var bridgeQueuedOpeningSlots = Set<Int>()
+    private var bridgeOpeningSlots = Set<Int>()
+    private var bridgeClosingSlots = Set<Int>()
+    private var bridgeRestartingSlots = Set<Int>()
+    private var bridgeLauncherWasBusy = false
     private var bridgePlayingSlots = Set<Int>()
     private var bridgeSlotPlaybackStatus: [String: String] = [:]
     private var bridgeSlotCurrentModule: [String: String] = [:]
@@ -708,6 +713,7 @@ final class StreamViewController: UIViewController {
         guiPanel.onRequestPresetSave = { [weak self] index, currentName, modules in
             self?.promptPresetName(index: index, currentName: currentName, modules: modules)
         }
+        guiPanel.onRestartController = { [weak self] in self?.sendRestartController() }
     }
 
     @objc private func previousSlotTapped() {
@@ -960,6 +966,7 @@ final class StreamViewController: UIViewController {
             sendViewerState("active", slot: slot)
         }
         selectedSlot = slot
+        guiPanel.updateStreamSlot(slot)
         connectionSequence += 1
         let sequence = connectionSequence
         switchStartedAt = Date()
@@ -1653,6 +1660,35 @@ final class StreamViewController: UIViewController {
                     let heartbeat = response.gui
                     self.bridgeHeartbeatFresh = heartbeat?.isFresh == true
                     self.bridgeHeartbeatRunningSlots = Set(heartbeat?.runningSlots ?? [])
+                    let launcherBusy = heartbeat?.launcherBusy == true
+                    let launcherAction = heartbeat?.launcherAction ?? ""
+                    let reportsOpening = launcherBusy && ["start", "start-missing"].contains(launcherAction)
+                    let reportsClosing = launcherBusy && launcherAction == "stop"
+                    let reportsRestarting = launcherBusy && ["restart", "repair-bad"].contains(launcherAction)
+                    let reported = Set(heartbeat?.launcherSlots ?? [])
+                    if reportsOpening {
+                        let opening = reported.subtracting(self.bridgeHeartbeatRunningSlots)
+                        self.bridgeQueuedOpeningSlots.subtract(opening)
+                        self.bridgeOpeningSlots = opening
+                        self.bridgeClosingSlots.removeAll()
+                        self.bridgeRestartingSlots.removeAll()
+                    } else if reportsClosing {
+                        self.bridgeOpeningSlots.removeAll()
+                        self.bridgeClosingSlots = reported
+                        self.bridgeRestartingSlots.removeAll()
+                    } else if reportsRestarting {
+                        self.bridgeOpeningSlots.removeAll()
+                        self.bridgeClosingSlots.removeAll()
+                        self.bridgeRestartingSlots = reported
+                    } else if self.bridgeLauncherWasBusy && !launcherBusy {
+                        self.bridgeQueuedOpeningSlots.removeAll()
+                        self.bridgeOpeningSlots.removeAll()
+                        self.bridgeClosingSlots.removeAll()
+                        self.bridgeRestartingSlots.removeAll()
+                    }
+                    self.bridgeQueuedOpeningSlots.subtract(self.bridgeHeartbeatRunningSlots)
+                    self.bridgeOpeningSlots.subtract(self.bridgeHeartbeatRunningSlots)
+                    self.bridgeLauncherWasBusy = launcherBusy
                     self.bridgePlayingSlots = Set(heartbeat?.playingSlots ?? [])
                     self.bridgeSlotPlaybackStatus = heartbeat?.slotPlaybackStatus ?? [:]
                     self.bridgeSlotCurrentModule = heartbeat?.slotCurrentModule ?? [:]
@@ -1661,8 +1697,8 @@ final class StreamViewController: UIViewController {
                     self.applyGUIBridgeState()
                     if response.executionOwner != "GUI_TEST_PC" || heartbeat?.executionOwner != "GUI_TEST_PC" {
                         self.guiPanel.setStatus("拒絕：bridge execution owner 不是 GUI_TEST_PC。", good: false)
-                    } else if !self.guiPanel.isHidden, self.bridgeHeartbeatFresh {
-                        self.guiPanel.setStatus("GUI_TEST_PC 已連線，等待橋接命令。", good: true)
+                    } else if !self.guiPanel.isHidden, !self.bridgeHeartbeatFresh {
+                        self.guiPanel.setStatus("GUI_TEST_PC 控制器沒有回應，可按重啟控制器。", good: false)
                     }
                 case .failure(let error):
                     if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
@@ -1675,6 +1711,10 @@ final class StreamViewController: UIViewController {
         let running = bridgeHeartbeatFresh ? bridgeHeartbeatRunningSlots : bridgeTargetRunningSlots
         guiPanel.apply(
             runningSlots: running,
+            queuedOpeningSlots: bridgeQueuedOpeningSlots,
+            openingSlots: bridgeOpeningSlots,
+            closingSlots: bridgeClosingSlots,
+            restartingSlots: bridgeRestartingSlots,
             playingSlots: bridgePlayingSlots,
             slotPlaybackStatus: bridgeSlotPlaybackStatus,
             slotCurrentModule: bridgeSlotCurrentModule,
@@ -1737,7 +1777,11 @@ final class StreamViewController: UIViewController {
     private func sendModuleChain(slots: [Int], modules: [String]) {
         guard let baseURL = configuredBaseURL() else { return }
         guiAPI.playModuleChain(baseURL: baseURL, slots: slots, modules: modules) { [weak self] result in
-            self?.handleBridgeResult(result, success: "模組串列已交給 GUI_TEST_PC")
+            self?.handlePlaybackBridgeResult(
+                result,
+                requestedSlots: slots,
+                success: "模組串列已交給 GUI_TEST_PC"
+            )
         }
     }
 
@@ -1756,7 +1800,11 @@ final class StreamViewController: UIViewController {
             runAt: formatter.string(from: date)
         )
         guiAPI.createPlaybackAutomation(baseURL: baseURL, request: request) { [weak self] result in
-            self?.handleBridgeResult(result, success: "定時播放已建立")
+            self?.handlePlaybackBridgeResult(
+                result,
+                requestedSlots: slots,
+                success: "定時播放已建立"
+            )
         }
     }
 
@@ -1776,7 +1824,11 @@ final class StreamViewController: UIViewController {
             runAt: nil
         )
         guiAPI.createPlaybackAutomation(baseURL: baseURL, request: request) { [weak self] result in
-            self?.handleBridgeResult(result, success: "循環播放已建立")
+            self?.handlePlaybackBridgeResult(
+                result,
+                requestedSlots: slots,
+                success: "循環播放已建立"
+            )
         }
     }
 
@@ -1803,8 +1855,50 @@ final class StreamViewController: UIViewController {
 
     private func sendLauncher(action: String, slots: [Int]) {
         guard let baseURL = configuredBaseURL() else { return }
+        let openingAction = action == "start" || action == "start-missing"
+        let closingAction = action == "stop"
+        let restartingAction = action == "restart" || action == "repair-bad"
+        let effectiveRunning = bridgeHeartbeatFresh ? bridgeHeartbeatRunningSlots : bridgeTargetRunningSlots
+        let requestedOpening = openingAction ? Set(slots).subtracting(effectiveRunning) : []
+        let requestedClosing = closingAction ? Set(slots).intersection(effectiveRunning) : []
+        let requestedRestarting = restartingAction ? Set(slots) : []
+        if openingAction {
+            bridgeQueuedOpeningSlots.formUnion(requestedOpening)
+            bridgeOpeningSlots.subtract(requestedOpening)
+        }
+        if closingAction { bridgeClosingSlots.formUnion(requestedClosing) }
+        if restartingAction { bridgeRestartingSlots.formUnion(requestedRestarting) }
+        applyGUIBridgeState()
         guiAPI.launcher(baseURL: baseURL, action: action, slots: slots) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response) where response.relayedTo == "GUI_TEST_PC":
+                    if openingAction, !requestedOpening.isEmpty {
+                        self.guiPanel.setStatus(
+                            "已送出開啟 GAME \(requestedOpening.sorted().map(String.init).joined(separator: ","))",
+                            good: true
+                        )
+                    }
+                default:
+                    self.bridgeQueuedOpeningSlots.subtract(requestedOpening)
+                    self.bridgeOpeningSlots.subtract(requestedOpening)
+                    self.bridgeClosingSlots.subtract(requestedClosing)
+                    self.bridgeRestartingSlots.subtract(requestedRestarting)
+                    self.applyGUIBridgeState()
+                }
+            }
             self?.handleBridgeResult(result, success: "\(action) 已交給 GUI_TEST_PC", delayedRefresh: true)
+        }
+        let pendingActionSlots = requestedOpening.union(requestedClosing).union(requestedRestarting)
+        guard !pendingActionSlots.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
+            guard let self, !self.bridgeLauncherWasBusy else { return }
+            self.bridgeQueuedOpeningSlots.subtract(requestedOpening)
+            self.bridgeOpeningSlots.subtract(requestedOpening)
+            self.bridgeClosingSlots.subtract(requestedClosing)
+            self.bridgeRestartingSlots.subtract(requestedRestarting)
+            self.applyGUIBridgeState()
         }
     }
 
@@ -1812,6 +1906,73 @@ final class StreamViewController: UIViewController {
         guard let baseURL = configuredBaseURL() else { return }
         guiAPI.ensureLayout(baseURL: baseURL, slots: slots) { [weak self] result in
             self?.handleBridgeResult(result, success: "視窗排列已交給 GUI_TEST_PC", delayedRefresh: true)
+        }
+    }
+
+    private func sendRestartController() {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.restartController(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.guiPanel.setStatus(
+                        response.controller.message ?? "控制器重啟已開始",
+                        good: response.ok
+                    )
+                    for delay in [1.5, 5.0, 15.0] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                            self?.refreshGUIBridgeState()
+                        }
+                    }
+                case .failure(let error):
+                    self.guiPanel.setStatus(error.localizedDescription, good: false)
+                }
+            }
+        }
+    }
+
+    private func handlePlaybackBridgeResult(
+        _ result: Result<GUIBridgeResponse, Error>,
+        requestedSlots: [Int],
+        success: String
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            switch result {
+            case .success(let response):
+                guard response.relayedTo == "GUI_TEST_PC" else {
+                    self.guiPanel.finishPlaybackSubmission(
+                        requestedSlots: requestedSlots,
+                        acceptedSlots: [],
+                        skippedSlots: [],
+                        error: "拒絕：命令未 relay 到 GUI_TEST_PC。"
+                    )
+                    return
+                }
+                let accepted = response.acceptedSlots ?? requestedSlots
+                let skipped = response.skippedSlots ?? []
+                self.guiPanel.finishPlaybackSubmission(
+                    requestedSlots: requestedSlots,
+                    acceptedSlots: accepted,
+                    skippedSlots: skipped,
+                    error: nil
+                )
+                let suffix = response.duplicate == true ? "（重複請求未再建立）" : ""
+                if skipped.isEmpty {
+                    self.guiPanel.setStatus("\(success)\(suffix)", good: true)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.refreshGUIBridgeState()
+                }
+            case .failure(let error):
+                self.guiPanel.finishPlaybackSubmission(
+                    requestedSlots: requestedSlots,
+                    acceptedSlots: [],
+                    skippedSlots: [],
+                    error: error.localizedDescription
+                )
+            }
         }
     }
 
