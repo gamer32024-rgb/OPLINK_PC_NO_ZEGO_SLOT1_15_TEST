@@ -11,11 +11,14 @@ class IOSSlotActivityContractTests(unittest.TestCase):
 
         self.assertIn('case slotCurrentModule = "slot_current_module"', source)
         self.assertIn('case picoActivitySlot = "pico_activity_slot"', source)
+        self.assertIn('case queuedPlaybackSlots = "queued_playback_slots"', source)
 
     def test_panel_pulses_one_pico_slot_and_fits_module_name(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
         self.assertIn('let key = "oplink.pico.activity"', panel)
+        self.assertIn("active: picoActivitySlot == slot", panel)
+        self.assertNotIn("active: playing || opening", panel)
         self.assertIn("displayedModuleName(for: slot)", panel)
         self.assertIn("minimumScaleFactor = 0.35", panel)
 
@@ -51,11 +54,41 @@ class IOSSlotActivityContractTests(unittest.TestCase):
     def test_module_layout_and_quick_buttons_match_updated_panel(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
-        self.assertIn("UIStackView(arrangedSubviews: [buildChainGrid(), modulesScroll])", panel)
+        self.assertIn("static let compactScale: CGFloat = 0.8", panel)
+        self.assertIn("UIStackView(arrangedSubviews: [modulesScroll, chainRow])", panel)
+        self.assertIn("multiplier: ModulePanelMetrics.compactScale", panel)
         self.assertIn("buildPresetGrid(),\n            automationRow", panel)
-        self.assertIn("columns: 4", panel)
-        self.assertIn("buttonHeight: 42", panel)
-        self.assertIn("fontSize: 15", panel)
+        self.assertIn("columns: 5", panel)
+        self.assertIn("buttonHeight: ModulePanelMetrics.quickButtonHeight", panel)
+        self.assertIn("fontSize: ModulePanelMetrics.quickFontSize", panel)
+
+    def test_preset_maps_to_cells_two_through_nine_and_plays_immediately(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+
+        self.assertIn("private func mapPresetToEditableCells", panel)
+        self.assertIn("moduleChain[offset + 1] = name", panel)
+        self.assertIn("let values = Array(preset.modules.prefix(8))", panel)
+        self.assertIn("beginPlaybackSubmission(slots: slots, feedbackButton: sender)", panel)
+        self.assertIn("onPlay?(slots, values)", panel)
+
+    def test_busy_playback_slots_can_be_manually_selected_for_replacement(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+
+        self.assertIn("automaticSelectionBlockedSlots", panel)
+        self.assertIn("selectedSlots.subtract(launcherTransitionSlots)", panel)
+        self.assertNotIn("onStopSlot?(slot)", panel)
+
+    def test_offline_controller_restart_button_cannot_collapse_into_a_line(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "restartControllerButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 30)",
+            panel,
+        )
+        self.assertIn(
+            "restartControllerButton.setContentCompressionResistancePriority(.required, for: .vertical)",
+            panel,
+        )
 
 
 if __name__ == "__main__":

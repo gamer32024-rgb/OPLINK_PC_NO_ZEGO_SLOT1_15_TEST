@@ -103,6 +103,7 @@ struct GUIHeartbeat: Decodable {
     let online: Bool?
     let runningSlots: [Int]
     let playingSlots: [Int]
+    let queuedPlaybackSlots: [Int]
     let slotPlaybackStatus: [String: String]
     let slotCurrentModule: [String: String]
     let picoActivitySlot: Int?
@@ -117,6 +118,7 @@ struct GUIHeartbeat: Decodable {
         case updatedAt = "updated_at"
         case runningSlots = "running_slots"
         case playingSlots = "playing_slots"
+        case queuedPlaybackSlots = "queued_playback_slots"
         case slotPlaybackStatus = "slot_playback_status"
         case slotCurrentModule = "slot_current_module"
         case picoActivitySlot = "pico_activity_slot"
@@ -133,6 +135,7 @@ struct GUIHeartbeat: Decodable {
         online = try values.decodeIfPresent(Bool.self, forKey: .online)
         runningSlots = try values.decodeIfPresent([Int].self, forKey: .runningSlots) ?? []
         playingSlots = try values.decodeIfPresent([Int].self, forKey: .playingSlots) ?? []
+        queuedPlaybackSlots = try values.decodeIfPresent([Int].self, forKey: .queuedPlaybackSlots) ?? []
         slotPlaybackStatus = try values.decodeIfPresent([String: String].self, forKey: .slotPlaybackStatus) ?? [:]
         slotCurrentModule = try values.decodeIfPresent([String: String].self, forKey: .slotCurrentModule) ?? [:]
         picoActivitySlot = try values.decodeIfPresent(Int.self, forKey: .picoActivitySlot)

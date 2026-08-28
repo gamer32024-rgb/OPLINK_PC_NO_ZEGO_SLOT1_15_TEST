@@ -1,6 +1,16 @@
 import UIKit
 
 final class GUIControlPanelView: UIView {
+    private enum ModulePanelMetrics {
+        static let compactScale: CGFloat = 0.8
+        static let chainButtonHeight: CGFloat = 31 * compactScale
+        static let chainFontSize: CGFloat = 10 * compactScale
+        static let chainCornerRadius: CGFloat = 7 * compactScale
+        static let chainSpacing: CGFloat = 5 * compactScale
+        static let quickButtonHeight: CGFloat = 42 * compactScale
+        static let quickFontSize: CGFloat = 15 * compactScale
+    }
+
     var onClose: (() -> Void)?
     var onRefresh: (() -> Void)?
     var onPlay: (([Int], [String]) -> Void)?
@@ -42,6 +52,7 @@ final class GUIControlPanelView: UIView {
     private var closingSlots = Set<Int>()
     private var restartingSlots = Set<Int>()
     private var playingSlots = Set<Int>()
+    private var queuedPlaybackSlots = Set<Int>()
     private var selectedSlots = Set<Int>()
     private var slotPlaybackStatus: [String: String] = [:]
     private var slotCurrentModule: [String: String] = [:]
@@ -58,6 +69,8 @@ final class GUIControlPanelView: UIView {
     private var pendingScheduledSlots: [Int] = []
     private var pendingScheduledModules: [String] = []
     private var pendingSubmissionSlots = Set<Int>()
+    private var pendingSubmissionExpiry: [Int: Date] = [:]
+    private var autoSelectedSlot: Int?
     private var heartbeatFresh = false
 
     private enum ChainInsertionMode: Equatable {
@@ -100,12 +113,14 @@ final class GUIControlPanelView: UIView {
     }
 
     func updateStreamSlot(_ streamSlot: Int) {
-        guard OPLINKSlots.range.contains(streamSlot), !unavailableSlots.contains(streamSlot) else {
+        guard OPLINKSlots.range.contains(streamSlot), !automaticSelectionBlockedSlots.contains(streamSlot) else {
             selectedSlots.removeAll()
+            autoSelectedSlot = nil
             refreshSlotButtons()
             return
         }
         selectedSlots = [streamSlot]
+        autoSelectedSlot = streamSlot
         refreshSlotButtons()
     }
 
@@ -116,6 +131,7 @@ final class GUIControlPanelView: UIView {
         closingSlots: Set<Int>,
         restartingSlots: Set<Int>,
         playingSlots: Set<Int>,
+        queuedPlaybackSlots: Set<Int>,
         slotPlaybackStatus: [String: String],
         slotCurrentModule: [String: String],
         picoActivitySlot: Int?,
@@ -131,13 +147,29 @@ final class GUIControlPanelView: UIView {
         self.closingSlots = closingSlots
         self.restartingSlots = restartingSlots
         self.playingSlots = playingSlots
+        self.queuedPlaybackSlots = queuedPlaybackSlots
         self.slotPlaybackStatus = slotPlaybackStatus
         self.slotCurrentModule = slotCurrentModule
         self.picoActivitySlot = picoActivitySlot
         self.presets = normalizedPresets(presets)
         self.playbackAutomations = playbackAutomations.filter(\.isActive)
         self.heartbeatFresh = heartbeatFresh
-        selectedSlots.subtract(unavailableSlots)
+        selectedSlots.subtract(launcherTransitionSlots)
+        if let autoSelectedSlot, automaticSelectionBlockedSlots.contains(autoSelectedSlot) {
+            selectedSlots.remove(autoSelectedSlot)
+            self.autoSelectedSlot = nil
+        }
+        let bridgePlaybackSlots = queuedPlaybackSlots
+            .union(playingSlots)
+            .union(activeAutomationSlots)
+        pendingSubmissionSlots.subtract(bridgePlaybackSlots)
+        let expiredPendingSlots = pendingSubmissionSlots.filter {
+            (pendingSubmissionExpiry[$0] ?? .distantPast) <= Date()
+        }
+        for slot in expiredPendingSlots {
+            pendingSubmissionSlots.remove(slot)
+            pendingSubmissionExpiry.removeValue(forKey: slot)
+        }
         restartControllerButton.isHidden = heartbeatFresh
 
         let available = Set(modules.keys)
@@ -198,19 +230,22 @@ final class GUIControlPanelView: UIView {
         skippedSlots: [Int],
         error: String?
     ) {
-        pendingSubmissionSlots.subtract(requestedSlots)
         if let error {
-            let restorable = Set(requestedSlots).subtracting(unavailableSlots)
+            pendingSubmissionSlots.subtract(requestedSlots)
+            for slot in requestedSlots { pendingSubmissionExpiry.removeValue(forKey: slot) }
+            let restorable = Set(requestedSlots).subtracting(launcherTransitionSlots)
             selectedSlots.formUnion(restorable)
             setStatus(error, good: false)
         } else {
+            pendingSubmissionSlots.subtract(skippedSlots)
+            for slot in skippedSlots { pendingSubmissionExpiry.removeValue(forKey: slot) }
             selectedSlots.subtract(acceptedSlots)
             let acceptedText = acceptedSlots.map(String.init).joined(separator: ",")
             if skippedSlots.isEmpty {
                 setStatus("已送出 Slot \(acceptedText)", good: true)
             } else {
                 let skippedText = skippedSlots.map(String.init).joined(separator: ",")
-                setStatus("已送出 Slot \(acceptedText)；Slot \(skippedText) 忙碌，已略過", good: true)
+                setStatus("已送出 Slot \(acceptedText)；Slot \(skippedText) 未接受", good: true)
             }
         }
         refreshSlotButtons()
@@ -247,12 +282,15 @@ final class GUIControlPanelView: UIView {
         restartControllerButton.backgroundColor = UIColor(red: 0.78, green: 0.18, blue: 0.16, alpha: 1)
         restartControllerButton.layer.cornerRadius = 7
         restartControllerButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        restartControllerButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
+        restartControllerButton.setContentCompressionResistancePriority(.required, for: .vertical)
         restartControllerButton.isHidden = true
         restartControllerButton.addTarget(self, action: #selector(restartControllerTapped), for: .touchUpInside)
         let statusRow = UIStackView(arrangedSubviews: [statusLabel, restartControllerButton])
         statusRow.axis = .horizontal
         statusRow.spacing = 8
         statusRow.alignment = .center
+        statusRow.setContentCompressionResistancePriority(.required, for: .vertical)
         let mainStack = UIStackView(arrangedSubviews: [statusRow, body])
         mainStack.axis = .vertical
         mainStack.spacing = 6
@@ -384,9 +422,18 @@ final class GUIControlPanelView: UIView {
             quickModuleGroupsStack.widthAnchor.constraint(equalTo: modulesScroll.frameLayoutGuide.widthAnchor)
         ])
 
-        let moduleContent = UIStackView(arrangedSubviews: [buildChainGrid(), modulesScroll])
+        let chainGrid = buildChainGrid()
+        let chainRow = UIStackView(arrangedSubviews: [chainGrid, UIView()])
+        chainRow.axis = .horizontal
+        chainRow.spacing = 0
+        chainGrid.widthAnchor.constraint(
+            equalTo: chainRow.widthAnchor,
+            multiplier: ModulePanelMetrics.compactScale
+        ).isActive = true
+
+        let moduleContent = UIStackView(arrangedSubviews: [modulesScroll, chainRow])
         moduleContent.axis = .vertical
-        moduleContent.spacing = 5
+        moduleContent.spacing = ModulePanelMetrics.chainSpacing
 
         let actionRail = UIStackView(arrangedSubviews: [UIView(), timed, play, clear, stop, closeButton])
         actionRail.axis = .vertical
@@ -404,24 +451,29 @@ final class GUIControlPanelView: UIView {
     private func buildChainGrid() -> UIStackView {
         let grid = UIStackView()
         grid.axis = .vertical
-        grid.spacing = 5
+        grid.spacing = ModulePanelMetrics.chainSpacing
         for rowIndex in 0..<2 {
             let row = UIStackView()
             row.axis = .horizontal
-            row.spacing = 5
+            row.spacing = ModulePanelMetrics.chainSpacing
             row.distribution = .fillEqually
             for columnIndex in 0..<5 {
                 let index = rowIndex * 5 + columnIndex
                 let button = chainButtons[index]
                 button.tag = index
-                button.layer.cornerRadius = 7
-                button.titleLabel?.font = .systemFont(ofSize: 10, weight: .bold)
+                button.layer.cornerRadius = ModulePanelMetrics.chainCornerRadius
+                button.titleLabel?.font = .systemFont(
+                    ofSize: ModulePanelMetrics.chainFontSize,
+                    weight: .bold
+                )
                 button.titleLabel?.numberOfLines = 2
                 button.titleLabel?.textAlignment = .center
                 button.titleLabel?.adjustsFontSizeToFitWidth = true
                 button.titleLabel?.minimumScaleFactor = 0.68
                 button.addTarget(self, action: #selector(chainTapped(_:)), for: .touchUpInside)
-                button.heightAnchor.constraint(equalToConstant: 31).isActive = true
+                button.heightAnchor.constraint(
+                    equalToConstant: ModulePanelMetrics.chainButtonHeight
+                ).isActive = true
                 row.addArrangedSubview(button)
             }
             grid.addArrangedSubview(row)
@@ -822,9 +874,9 @@ final class GUIControlPanelView: UIView {
 
         populateModuleGroups(
             in: quickModuleGroupsStack,
-            columns: 4,
-            buttonHeight: 42,
-            fontSize: 15,
+            columns: 5,
+            buttonHeight: ModulePanelMetrics.quickButtonHeight,
+            fontSize: ModulePanelMetrics.quickFontSize,
             fixedButtonWidth: nil,
             singleLine: true,
             groupsPerRow: 2
@@ -942,7 +994,8 @@ final class GUIControlPanelView: UIView {
             let playing = playingSlots.contains(slot) || playbackAutomations.contains {
                 $0.status == "running" && $0.slots.contains(slot)
             }
-            let reserved = automation != nil || pendingSubmissionSlots.contains(slot)
+            let queuedPlayback = queuedPlaybackSlots.contains(slot)
+            let reserved = automation != nil || pendingSubmissionSlots.contains(slot) || queuedPlayback
             let selected = selectedSlots.contains(slot)
             let moduleName = displayedModuleName(for: slot)
             if restarting {
@@ -986,10 +1039,12 @@ final class GUIControlPanelView: UIView {
                 button.backgroundColor = UIColor(white: running ? 0.34 : 0.18, alpha: 1)
                 button.setTitleColor(.white, for: .normal)
             }
+            button.layer.borderWidth = selected ? 2.5 : 0
+            button.layer.borderColor = UIColor(red: 0.47, green: 0.86, blue: 0.94, alpha: 1).cgColor
             button.alpha = running || selected || playing || reserved || opening || closing || restarting || queuedOpening || loop != nil ? 1 : 0.93
             updatePicoActivityAnimation(
                 for: button,
-                active: playing || opening || closing || restarting || picoActivitySlot == slot
+                active: picoActivitySlot == slot
             )
             if restarting {
                 button.accessibilityHint = "遊戲視窗正在重啟，暫時不能選取"
@@ -1000,11 +1055,11 @@ final class GUIControlPanelView: UIView {
             } else if queuedOpening {
                 button.accessibilityHint = "已送出開啟命令，正在等待 GUI_TEST_PC 接收"
             } else if loop != nil {
-                button.accessibilityHint = "循環播放有效，點擊中止整個循環工作"
+                button.accessibilityHint = "循環播放有效；可選取並用新設定取代"
             } else if playing {
-                button.accessibilityHint = slotPlaybackStatus[String(slot)] ?? "播放中，點擊只中止此槽"
+                button.accessibilityHint = slotPlaybackStatus[String(slot)] ?? "播放中；可選取並用新設定取代"
             } else if reserved {
-                button.accessibilityHint = "已保留，不能建立第二個播放工作"
+                button.accessibilityHint = "已有等待工作；可選取並用新設定取代"
             } else {
                 button.accessibilityHint = running ? "在線" : "離線"
             }
@@ -1054,18 +1109,26 @@ final class GUIControlPanelView: UIView {
         playbackAutomations.first { $0.isActive && $0.slots.contains(slot) }
     }
 
-    private var unavailableSlots: Set<Int> {
-        let automated = playbackAutomations.reduce(into: Set<Int>()) { slots, automation in
+    private var activeAutomationSlots: Set<Int> {
+        playbackAutomations.reduce(into: Set<Int>()) { slots, automation in
             guard automation.isActive else { return }
             slots.formUnion(automation.slots)
         }
-        return playingSlots
-            .union(automated)
-            .union(pendingSubmissionSlots)
-            .union(queuedOpeningSlots)
+    }
+
+    private var launcherTransitionSlots: Set<Int> {
+        queuedOpeningSlots
             .union(openingSlots)
             .union(closingSlots)
             .union(restartingSlots)
+    }
+
+    private var automaticSelectionBlockedSlots: Set<Int> {
+        playingSlots
+            .union(queuedPlaybackSlots)
+            .union(activeAutomationSlots)
+            .union(pendingSubmissionSlots)
+            .union(launcherTransitionSlots)
     }
 
     private func refreshChainButtons() {
@@ -1196,19 +1259,19 @@ final class GUIControlPanelView: UIView {
     }
 
     private func requireSelectedSlots() -> [Int]? {
-        let skipped = selectedSlots.intersection(unavailableSlots).sorted()
+        let skipped = selectedSlots.intersection(launcherTransitionSlots).sorted()
         selectedSlots.subtract(skipped)
         let slots = selectedSlots.sorted()
         if slots.isEmpty {
             setStatus(
-                skipped.isEmpty ? "請先選擇至少一個遊戲視窗。" : "所選 Slot 已有工作，本次沒有送出。",
+                skipped.isEmpty ? "請先選擇至少一個遊戲視窗。" : "所選 Slot 正在開啟、關閉或重啟，本次沒有送出。",
                 good: false
             )
             refreshSlotButtons()
             return nil
         }
         if !skipped.isEmpty {
-            setStatus("Slot \(skipped.map(String.init).joined(separator: ",")) 忙碌，已略過", good: false)
+            setStatus("Slot \(skipped.map(String.init).joined(separator: ",")) 正在切換遊戲狀態，已略過", good: false)
         }
         return slots
     }
@@ -1239,6 +1302,21 @@ final class GUIControlPanelView: UIView {
             moduleChain[start + offset] = name
         }
         return start
+    }
+
+    private func mapPresetToEditableCells(_ values: [String]) {
+        let mapped = Array(values.prefix(8))
+        moduleChain = Array(repeating: nil, count: 10)
+        for (offset, name) in mapped.enumerated() {
+            moduleChain[offset + 1] = name
+        }
+        activeChainIndex = min(9, mapped.count + 1)
+        chainInsertion = ChainInsertion(
+            position: mapped.count,
+            start: 1,
+            mode: .tail,
+            activeCell: activeChainIndex
+        )
     }
 
     private func insertModule(_ moduleName: String) {
@@ -1289,18 +1367,7 @@ final class GUIControlPanelView: UIView {
             setStatus("GAME \(slot) \(status)，不能重複選取。", good: false)
             return
         }
-        let automationRunning = playbackAutomations.contains {
-            $0.status == "running" && $0.slots.contains(slot)
-        }
-        if playingSlots.contains(slot) || automationRunning || activeLoop(for: slot) != nil {
-            setStatus("正在中止 GAME \(slot)...", good: true)
-            onStopSlot?(slot)
-            return
-        }
-        if activeAutomation(for: slot) != nil || pendingSubmissionSlots.contains(slot) {
-            setStatus("GAME \(slot) 已有等待、定時或循環工作，不能再選取。", good: false)
-            return
-        }
+        autoSelectedSlot = nil
         if selectedSlots.contains(slot) {
             selectedSlots.remove(slot)
         } else {
@@ -1310,11 +1377,13 @@ final class GUIControlPanelView: UIView {
     }
 
     @objc private func selectAllTapped() {
-        selectedSlots = Set(OPLINKSlots.range).subtracting(unavailableSlots)
+        autoSelectedSlot = nil
+        selectedSlots = Set(OPLINKSlots.range).subtracting(launcherTransitionSlots)
         refreshSlotButtons()
     }
 
     @objc private func clearSlotsTapped() {
+        autoSelectedSlot = nil
         selectedSlots.removeAll()
         refreshSlotButtons()
     }
@@ -1356,17 +1425,16 @@ final class GUIControlPanelView: UIView {
             return
         }
         activePresetIndex = index
-        let values = Array(preset.modules.prefix(10))
-        let start = packChain(values, preferredStart: 0)
-        chainInsertion = ChainInsertion(
-            position: values.count,
-            start: start,
-            mode: .tail,
-            activeCell: min(9, start + values.count)
-        )
+        let values = Array(preset.modules.prefix(8))
+        mapPresetToEditableCells(values)
         moduleChooser.isHidden = true
         refreshChainButtons()
-        setStatus("已載入 \(preset.name)，可修改後按播放。", good: true)
+        guard let slots = requireSelectedSlots() else {
+            setStatus("已載入 \(preset.name) 到第 2–9 格；選擇 Slot 後再按預設即可播放。", good: false)
+            return
+        }
+        beginPlaybackSubmission(slots: slots, feedbackButton: sender)
+        onPlay?(slots, values)
     }
 
     @objc private func presetLongPressed(_ gesture: UILongPressGestureRecognizer) {
@@ -1378,15 +1446,8 @@ final class GUIControlPanelView: UIView {
         let preset = presets.first { $0.index == index }
             ?? GUIModuleChainPreset(index: index, name: "連串 \(index)", modules: [])
         activePresetIndex = index
-        let values = Array(preset.modules.prefix(10))
-        let start = packChain(values, preferredStart: 0)
-        activeChainIndex = min(values.count, 9)
-        chainInsertion = ChainInsertion(
-            position: values.count,
-            start: start,
-            mode: .tail,
-            activeCell: activeChainIndex
-        )
+        let values = Array(preset.modules.prefix(8))
+        mapPresetToEditableCells(values)
         refreshChainButtons()
         moduleChooser.isHidden = false
     }
@@ -1553,12 +1614,17 @@ final class GUIControlPanelView: UIView {
         onArrange?(slots)
     }
 
-    private func beginPlaybackSubmission(slots: [Int]) {
+    private func beginPlaybackSubmission(slots: [Int], feedbackButton: UIButton? = nil) {
         pendingSubmissionSlots.formUnion(slots)
+        let expiresAt = Date().addingTimeInterval(30)
+        for slot in slots { pendingSubmissionExpiry[slot] = expiresAt }
         selectedSlots.subtract(slots)
+        if let autoSelectedSlot, slots.contains(autoSelectedSlot) {
+            self.autoSelectedSlot = nil
+        }
         setStatus("正在送出 Slot \(slots.map(String.init).joined(separator: ","))...", good: true)
         refreshSlotButtons()
-        guard let button = playActionButton else { return }
+        guard let button = feedbackButton ?? playActionButton else { return }
         UIView.animate(withDuration: 0.1, animations: {
             button.transform = CGAffineTransform(scaleX: 0.86, y: 0.86)
             button.alpha = 0.65

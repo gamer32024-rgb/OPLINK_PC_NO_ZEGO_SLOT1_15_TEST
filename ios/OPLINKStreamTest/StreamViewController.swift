@@ -95,6 +95,7 @@ final class StreamViewController: UIViewController {
     private var bridgeRestartingSlots = Set<Int>()
     private var bridgeLauncherWasBusy = false
     private var bridgePlayingSlots = Set<Int>()
+    private var bridgeQueuedPlaybackSlots = Set<Int>()
     private var bridgeSlotPlaybackStatus: [String: String] = [:]
     private var bridgeSlotCurrentModule: [String: String] = [:]
     private var bridgePicoActivitySlot: Int?
@@ -1690,6 +1691,7 @@ final class StreamViewController: UIViewController {
                     self.bridgeOpeningSlots.subtract(self.bridgeHeartbeatRunningSlots)
                     self.bridgeLauncherWasBusy = launcherBusy
                     self.bridgePlayingSlots = Set(heartbeat?.playingSlots ?? [])
+                    self.bridgeQueuedPlaybackSlots = Set(heartbeat?.queuedPlaybackSlots ?? [])
                     self.bridgeSlotPlaybackStatus = heartbeat?.slotPlaybackStatus ?? [:]
                     self.bridgeSlotCurrentModule = heartbeat?.slotCurrentModule ?? [:]
                     self.bridgePicoActivitySlot = heartbeat?.picoActivitySlot
@@ -1716,6 +1718,7 @@ final class StreamViewController: UIViewController {
             closingSlots: bridgeClosingSlots,
             restartingSlots: bridgeRestartingSlots,
             playingSlots: bridgePlayingSlots,
+            queuedPlaybackSlots: bridgeQueuedPlaybackSlots,
             slotPlaybackStatus: bridgeSlotPlaybackStatus,
             slotCurrentModule: bridgeSlotCurrentModule,
             picoActivitySlot: bridgePicoActivitySlot,
