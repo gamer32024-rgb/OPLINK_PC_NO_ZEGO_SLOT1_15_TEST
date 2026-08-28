@@ -171,6 +171,10 @@ final class GUIControlPanelView: UIView {
             pendingSubmissionExpiry.removeValue(forKey: slot)
         }
         restartControllerButton.isHidden = heartbeatFresh
+        if heartbeatFresh,
+           statusLabel.text?.contains("GUI_TEST_PC 控制器沒有回應") == true {
+            setStatus("GUI_TEST_PC 控制器已恢復連線。", good: true)
+        }
 
         let available = Set(modules.keys)
         var orderedGroups: [GUIModuleGroup] = []
@@ -341,6 +345,9 @@ final class GUIControlPanelView: UIView {
                 button.titleLabel?.lineBreakMode = .byWordWrapping
                 button.layer.cornerRadius = 8
                 button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
+                let longPress = UILongPressGestureRecognizer(target: self, action: #selector(slotLongPressed(_:)))
+                longPress.minimumPressDuration = 0.45
+                button.addGestureRecognizer(longPress)
                 button.heightAnchor.constraint(equalToConstant: 31).isActive = true
                 row.addArrangedSubview(button)
             }
@@ -1055,11 +1062,11 @@ final class GUIControlPanelView: UIView {
             } else if queuedOpening {
                 button.accessibilityHint = "已送出開啟命令，正在等待 GUI_TEST_PC 接收"
             } else if loop != nil {
-                button.accessibilityHint = "循環播放有效；可選取並用新設定取代"
+                button.accessibilityHint = "點按中止，長按選取並用新設定取代"
             } else if playing {
-                button.accessibilityHint = slotPlaybackStatus[String(slot)] ?? "播放中；可選取並用新設定取代"
+                button.accessibilityHint = "\(slotPlaybackStatus[String(slot)] ?? "播放中")；點按中止，長按選取並用新設定取代"
             } else if reserved {
-                button.accessibilityHint = "已有等待工作；可選取並用新設定取代"
+                button.accessibilityHint = "已有等待工作；點按中止，長按選取並用新設定取代"
             } else {
                 button.accessibilityHint = running ? "在線" : "離線"
             }
@@ -1123,12 +1130,15 @@ final class GUIControlPanelView: UIView {
             .union(restartingSlots)
     }
 
-    private var automaticSelectionBlockedSlots: Set<Int> {
+    private var playbackBusySlots: Set<Int> {
         playingSlots
             .union(queuedPlaybackSlots)
             .union(activeAutomationSlots)
             .union(pendingSubmissionSlots)
-            .union(launcherTransitionSlots)
+    }
+
+    private var automaticSelectionBlockedSlots: Set<Int> {
+        playbackBusySlots.union(launcherTransitionSlots)
     }
 
     private func refreshChainButtons() {
@@ -1367,12 +1377,40 @@ final class GUIControlPanelView: UIView {
             setStatus("GAME \(slot) \(status)，不能重複選取。", good: false)
             return
         }
+        if playbackBusySlots.contains(slot) {
+            autoSelectedSlot = nil
+            selectedSlots.remove(slot)
+            pendingSubmissionSlots.remove(slot)
+            pendingSubmissionExpiry.removeValue(forKey: slot)
+            setStatus("正在中止 GAME \(slot)...", good: true)
+            if let automation = activeAutomation(for: slot), automation.status == "waiting" {
+                onCancelAutomation?(automation.id)
+            } else {
+                onStopSlot?(slot)
+            }
+            refreshSlotButtons()
+            return
+        }
         autoSelectedSlot = nil
         if selectedSlots.contains(slot) {
             selectedSlots.remove(slot)
         } else {
             selectedSlots.insert(slot)
         }
+        refreshSlotButtons()
+    }
+
+    @objc private func slotLongPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let button = gesture.view as? UIButton else { return }
+        let slot = button.tag
+        guard !launcherTransitionSlots.contains(slot) else {
+            setStatus("GAME \(slot) 正在切換遊戲狀態，暫時不能選取。", good: false)
+            return
+        }
+        guard playbackBusySlots.contains(slot) else { return }
+        autoSelectedSlot = nil
+        selectedSlots.insert(slot)
+        setStatus("已選取 GAME \(slot)；下一個播放設定會立即取代目前工作。", good: true)
         refreshSlotButtons()
     }
 

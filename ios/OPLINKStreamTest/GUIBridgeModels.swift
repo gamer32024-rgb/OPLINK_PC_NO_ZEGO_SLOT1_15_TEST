@@ -150,9 +150,14 @@ struct GUIHeartbeat: Decodable {
     }
 
     var isFresh: Bool {
-        guard let updatedAt,
-              let date = ISO8601DateFormatter().date(from: updatedAt) else { return false }
-        return Date().timeIntervalSince(date) < 12
+        guard let updatedAt else { return false }
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standardFormatter = ISO8601DateFormatter()
+        guard let date = fractionalFormatter.date(from: updatedAt)
+            ?? standardFormatter.date(from: updatedAt) else { return false }
+        let age = Date().timeIntervalSince(date)
+        return age >= -2 && age < 12
     }
 }
 

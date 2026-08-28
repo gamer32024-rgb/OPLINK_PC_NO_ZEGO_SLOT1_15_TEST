@@ -1659,7 +1659,8 @@ final class StreamViewController: UIViewController {
                 switch result {
                 case .success(let response):
                     let heartbeat = response.gui
-                    self.bridgeHeartbeatFresh = heartbeat?.isFresh == true
+                    self.bridgeHeartbeatFresh = response.controller?.online
+                        ?? (heartbeat?.isFresh == true)
                     self.bridgeHeartbeatRunningSlots = Set(heartbeat?.runningSlots ?? [])
                     let launcherBusy = heartbeat?.launcherBusy == true
                     let launcherAction = heartbeat?.launcherAction ?? ""

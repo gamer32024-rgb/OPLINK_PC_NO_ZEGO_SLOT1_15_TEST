@@ -71,12 +71,25 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertIn("beginPlaybackSubmission(slots: slots, feedbackButton: sender)", panel)
         self.assertIn("onPlay?(slots, values)", panel)
 
-    def test_busy_playback_slots_can_be_manually_selected_for_replacement(self) -> None:
+    def test_busy_playback_slot_tap_cancels_and_long_press_selects_for_replacement(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
         self.assertIn("automaticSelectionBlockedSlots", panel)
+        self.assertIn("playbackBusySlots", panel)
         self.assertIn("selectedSlots.subtract(launcherTransitionSlots)", panel)
-        self.assertNotIn("onStopSlot?(slot)", panel)
+        self.assertIn("onStopSlot?(slot)", panel)
+        self.assertIn("onCancelAutomation?(automation.id)", panel)
+        self.assertIn("#selector(slotLongPressed(_:))", panel)
+        self.assertIn("下一個播放設定會立即取代目前工作", panel)
+
+    def test_controller_health_accepts_fractional_heartbeat_and_server_truth(self) -> None:
+        models = (ROOT / "ios/OPLINKStreamTest/GUIBridgeModels.swift").read_text(encoding="utf-8")
+        controller = (ROOT / "ios/OPLINKStreamTest/StreamViewController.swift").read_text(encoding="utf-8")
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+
+        self.assertIn(".withFractionalSeconds", models)
+        self.assertIn("response.controller?.online", controller)
+        self.assertIn("GUI_TEST_PC 控制器已恢復連線", panel)
 
     def test_offline_controller_restart_button_cannot_collapse_into_a_line(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
