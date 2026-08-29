@@ -3,7 +3,7 @@ name: Build unsigned IPA
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/native-single-stream-router]
     paths:
       - "ios/**"
       - "scripts/audit_public_repo.py"
@@ -45,4 +45,3 @@ jobs:
           path: ios/dist/OPLINKStreamTest-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
-
