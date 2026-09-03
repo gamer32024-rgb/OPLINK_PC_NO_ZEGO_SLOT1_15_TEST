@@ -1,0 +1,4 @@
+# The snapshot records source and selected safe configuration only.
+/gui_test_pc/netbind_pc/build/
+/gui_test_pc/netbind_pc/build_ninja/
+/gui_test_pc/tests_pc/__pycache__/

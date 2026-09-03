@@ -1,0 +1,223 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-19T00:33:20+08:00",
+  "target": {
+    "hwnd": 21364944,
+    "hwnd_hex": "0x14600D0",
+    "pid": 29800,
+    "title": "[07] StarCG",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 29800,
+    "slot": 7,
+    "target_id": "slot:7",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 57594,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 1338,
+      "x": 1853,
+      "y": 797,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 3924,
+      "x": 106,
+      "y": 153,
+      "button": "left",
+      "duration_ms": 21
+    },
+    {
+      "type": "click",
+      "t_ms": 5776,
+      "x": 1465,
+      "y": 855,
+      "button": "left",
+      "duration_ms": 76
+    },
+    {
+      "type": "click",
+      "t_ms": 7752,
+      "x": 93,
+      "y": 352,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 9456,
+      "x": 407,
+      "y": 428,
+      "button": "left",
+      "duration_ms": 95
+    },
+    {
+      "type": "click",
+      "t_ms": 11770,
+      "x": 995,
+      "y": 746,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 14012,
+      "x": 815,
+      "y": 655,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 16003,
+      "x": 1456,
+      "y": 861,
+      "button": "left",
+      "duration_ms": 54
+    },
+    {
+      "type": "click",
+      "t_ms": 18214,
+      "x": 92,
+      "y": 522,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 20561,
+      "x": 404,
+      "y": 430,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 22897,
+      "x": 999,
+      "y": 749,
+      "button": "left",
+      "duration_ms": 74
+    },
+    {
+      "type": "click",
+      "t_ms": 24996,
+      "x": 842,
+      "y": 660,
+      "button": "left",
+      "duration_ms": 97
+    },
+    {
+      "type": "click",
+      "t_ms": 27535,
+      "x": 1457,
+      "y": 864,
+      "button": "left",
+      "duration_ms": 43
+    },
+    {
+      "type": "click",
+      "t_ms": 30021,
+      "x": 82,
+      "y": 703,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 32314,
+      "x": 417,
+      "y": 426,
+      "button": "left",
+      "duration_ms": 98
+    },
+    {
+      "type": "click",
+      "t_ms": 34934,
+      "x": 998,
+      "y": 750,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 37497,
+      "x": 834,
+      "y": 657,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 40007,
+      "x": 1461,
+      "y": 860,
+      "button": "left",
+      "duration_ms": 74
+    },
+    {
+      "type": "click",
+      "t_ms": 42671,
+      "x": 90,
+      "y": 891,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 45232,
+      "x": 417,
+      "y": 428,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 47859,
+      "x": 996,
+      "y": 753,
+      "button": "left",
+      "duration_ms": 32
+    },
+    {
+      "type": "click",
+      "t_ms": 50337,
+      "x": 833,
+      "y": 658,
+      "button": "left",
+      "duration_ms": 63
+    },
+    {
+      "type": "click",
+      "t_ms": 52926,
+      "x": 1447,
+      "y": 861,
+      "button": "left",
+      "duration_ms": 53
+    },
+    {
+      "type": "click",
+      "t_ms": 55627,
+      "x": 1556,
+      "y": 166,
+      "button": "left",
+      "duration_ms": 85
+    }
+  ]
+}

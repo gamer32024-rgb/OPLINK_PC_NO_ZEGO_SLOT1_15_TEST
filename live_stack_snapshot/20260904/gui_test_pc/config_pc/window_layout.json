@@ -1,0 +1,31 @@
+﻿{
+    "format":  "gui_test_pc_window_layout_v3_hard_4k_stacked",
+    "policy_id":  "starcg_4k_stacked_720p_pico_v2",
+    "layout_mode":  "stacked",
+    "locked":  true,
+    "created_at":  "2026-07-13T17:44:54",
+    "coordinate_space":  "physical_desktop_pixels",
+    "display":  {
+                    "x":  0,
+                    "y":  0,
+                    "width":  3840,
+                    "height":  2160
+                },
+    "grid":  {
+                 "columns":  1,
+                 "rows":  20,
+                 "origin_x":  0,
+                 "origin_y":  0,
+                 "gap_x":  0,
+                 "gap_y":  0
+             },
+    "expected_client":  {
+                            "width":  1280,
+                            "height":  720
+                        },
+    "expected_outer":  {
+                           "width":  1302,
+                           "height":  776
+                       },
+    "note":  "Slots 1-20 use one fixed overlapping position with a 1280x720 physical client area. Windows are resized and moved before playback."
+}

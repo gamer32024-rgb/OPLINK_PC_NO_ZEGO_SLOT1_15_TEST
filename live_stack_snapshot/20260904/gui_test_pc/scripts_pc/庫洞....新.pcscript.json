@@ -1,0 +1,183 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-19T00:47:51+08:00",
+  "target": {
+    "hwnd": 12258476,
+    "hwnd_hex": "0xBB0CAC",
+    "pid": 22752,
+    "title": "[03] StarCG",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 22752,
+    "slot": 3,
+    "target_id": "slot:3",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 225396,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 2600,
+      "x": 1720,
+      "y": 230,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 4704,
+      "x": 390,
+      "y": 273,
+      "button": "left",
+      "duration_ms": 97
+    },
+    {
+      "type": "click",
+      "t_ms": 6985,
+      "x": 1056,
+      "y": 787,
+      "button": "left",
+      "duration_ms": 116
+    },
+    {
+      "type": "click",
+      "t_ms": 9274,
+      "x": 368,
+      "y": 404,
+      "button": "left",
+      "duration_ms": 52
+    },
+    {
+      "type": "click",
+      "t_ms": 11228,
+      "x": 556,
+      "y": 497,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 13610,
+      "x": 780,
+      "y": 436,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 16383,
+      "x": 813,
+      "y": 660,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 19964,
+      "x": 1730,
+      "y": 232,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 22811,
+      "x": 1295,
+      "y": 518,
+      "button": "left",
+      "duration_ms": 128
+    },
+    {
+      "type": "click",
+      "t_ms": 25071,
+      "x": 1277,
+      "y": 388,
+      "button": "left",
+      "duration_ms": 75
+    },
+    {
+      "type": "click",
+      "t_ms": 34869,
+      "x": 1492,
+      "y": 326,
+      "button": "left",
+      "duration_ms": 84
+    },
+    {
+      "type": "click",
+      "t_ms": 37403,
+      "x": 1562,
+      "y": 503,
+      "button": "left",
+      "duration_ms": 178
+    },
+    {
+      "type": "click",
+      "t_ms": 42244,
+      "x": 901,
+      "y": 497,
+      "button": "left",
+      "duration_ms": 130
+    },
+    {
+      "type": "click",
+      "t_ms": 44971,
+      "x": 1676,
+      "y": 703,
+      "button": "left",
+      "duration_ms": 77
+    },
+    {
+      "type": "click",
+      "t_ms": 48052,
+      "x": 1566,
+      "y": 507,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 55957,
+      "x": 1566,
+      "y": 507,
+      "button": "left",
+      "duration_ms": 32
+    },
+    {
+      "type": "click",
+      "t_ms": 217148,
+      "x": 1494,
+      "y": 315,
+      "button": "left",
+      "duration_ms": 42
+    },
+    {
+      "type": "click",
+      "t_ms": 219356,
+      "x": 1756,
+      "y": 1009,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 221816,
+      "x": 1634,
+      "y": 629,
+      "button": "left",
+      "duration_ms": 117
+    }
+  ]
+}

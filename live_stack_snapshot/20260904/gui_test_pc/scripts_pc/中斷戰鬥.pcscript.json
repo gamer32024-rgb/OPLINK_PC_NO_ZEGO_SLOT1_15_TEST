@@ -1,0 +1,249 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-20T06:45:51+08:00",
+  "target": {
+    "hwnd": 1771132,
+    "hwnd_hex": "0x1B067C",
+    "pid": 26260,
+    "title": "[15] 「星詠魔力 - 十五五5」「S1雙子 - 雙子一」「Lv.72 Hp:1374/1374 Mp:459」",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 26260,
+    "slot": 15,
+    "target_id": "slot:15",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 11799,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 832,
+      "x": 1602,
+      "y": 849,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 1047,
+      "x": 1638,
+      "y": 743,
+      "button": "left",
+      "drag_id": "drag_0002",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 1058,
+      "x": 1639,
+      "y": 742,
+      "drag_id": "drag_0002"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 1163,
+      "x": 1639,
+      "y": 742,
+      "button": "left",
+      "drag_id": "drag_0002",
+      "duration_ms": 116
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 1267,
+      "x": 1641,
+      "y": 740,
+      "button": "left",
+      "drag_id": "drag_0005",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 1288,
+      "x": 1642,
+      "y": 739,
+      "drag_id": "drag_0005"
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 1350,
+      "x": 1643,
+      "y": 739,
+      "drag_id": "drag_0005"
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 1360,
+      "x": 1645,
+      "y": 738,
+      "drag_id": "drag_0005"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 1371,
+      "x": 1645,
+      "y": 738,
+      "button": "left",
+      "drag_id": "drag_0005",
+      "duration_ms": 104
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 1479,
+      "x": 1656,
+      "y": 727,
+      "button": "left",
+      "drag_id": "drag_0010",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 1490,
+      "x": 1657,
+      "y": 726,
+      "drag_id": "drag_0010"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 1564,
+      "x": 1657,
+      "y": 726,
+      "button": "left",
+      "drag_id": "drag_0010",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 2041,
+      "x": 1668,
+      "y": 994,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 3747,
+      "x": 1582,
+      "y": 607,
+      "button": "left",
+      "duration_ms": 94
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 7087,
+      "x": 1679,
+      "y": 732,
+      "button": "left",
+      "drag_id": "drag_0015",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 7098,
+      "x": 1679,
+      "y": 744,
+      "drag_id": "drag_0015"
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 7108,
+      "x": 1679,
+      "y": 746,
+      "drag_id": "drag_0015"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 7151,
+      "x": 1679,
+      "y": 746,
+      "button": "left",
+      "drag_id": "drag_0015",
+      "duration_ms": 64
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 7238,
+      "x": 1648,
+      "y": 764,
+      "button": "left",
+      "drag_id": "drag_0019",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 7312,
+      "x": 1645,
+      "y": 765,
+      "drag_id": "drag_0019"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 7324,
+      "x": 1645,
+      "y": 765,
+      "button": "left",
+      "drag_id": "drag_0019",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 7408,
+      "x": 1533,
+      "y": 781,
+      "button": "left",
+      "duration_ms": 83
+    },
+    {
+      "type": "click",
+      "t_ms": 7608,
+      "x": 1516,
+      "y": 786,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 8154,
+      "x": 1614,
+      "y": 801,
+      "button": "left",
+      "drag_id": "drag_0024",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 8175,
+      "x": 1615,
+      "y": 801,
+      "drag_id": "drag_0024"
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 8249,
+      "x": 1616,
+      "y": 802,
+      "drag_id": "drag_0024"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 8281,
+      "x": 1616,
+      "y": 802,
+      "button": "left",
+      "drag_id": "drag_0024",
+      "duration_ms": 127
+    }
+  ]
+}

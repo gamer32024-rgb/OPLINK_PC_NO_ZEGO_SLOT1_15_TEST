@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="theme-color" content="#07100e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="GUI_TEST_PC" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>GUI_TEST_PC 模組播放</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#07100e;--panel:#111b18;--panel-2:#17231f;--tile:#26332e;--line:#3b4b44;--text:#f3f7f5;--muted:#9baca4;--green:#28d17c;--cyan:#2bb9ce;--yellow:#f0b429;--red:#dc4437;--blue:#297db7;--safe-b:env(safe-area-inset-bottom,0px)}
+    html,body{width:100%;height:100%;overflow:hidden;font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;background:radial-gradient(circle at 78% 5%,#16352a 0,transparent 32%),linear-gradient(135deg,#060b0a,#0c1713 55%,#07100e);color:var(--text);touch-action:manipulation;-webkit-text-size-adjust:100%}
+    button,input{font:inherit;-webkit-tap-highlight-color:transparent}
+    button{border:0;color:inherit;cursor:pointer}
+    button:active{filter:brightness(.8)}
+    button:disabled{opacity:.35;cursor:not-allowed}
+    #app{height:100%;padding:max(8px,env(safe-area-inset-top,0px)) max(8px,env(safe-area-inset-right,0px)) calc(8px + var(--safe-b)) max(8px,env(safe-area-inset-left,0px))}
+    .playback-board{height:100%;display:grid;grid-template-columns:minmax(280px,34%) minmax(0,66%);gap:8px}
+    .panel{min-width:0;min-height:0;border:1px solid rgba(153,184,170,.22);border-radius:14px;background:rgba(10,18,16,.88);box-shadow:0 18px 55px rgba(0,0,0,.35);backdrop-filter:blur(12px)}
+    .left-panel{display:flex;flex-direction:column;gap:7px;padding:10px;overflow-y:auto}
+    .slot-grid,.chain-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+    .slot,.chain-cell,.preset,.module{position:relative;min-width:0;min-height:42px;border-radius:9px;background:var(--tile);border:1px solid transparent;font-weight:800;overflow:hidden}
+    .slot{font-size:.92rem;color:#c9d5d0}.slot.running::before{content:"";position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--green)}.slot.offline{opacity:.52}.slot.selected{background:#124d32;border-color:var(--green);color:#d8ffe9}.slot.playing{background:#632a27;border-color:#ff766a;color:#fff}.slot.looping{box-shadow:inset 0 0 0 1px var(--yellow)}
+    .dual-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+    .compact-btn,.rail-btn,.sheet-btn{min-height:38px;border-radius:9px;padding:7px 10px;font-weight:900;background:var(--tile)}
+    .compact-btn.on{background:#067e91}.compact-btn.off{background:#a7352b}
+    .chain-grid{margin-top:1px}
+    .chain-cell{height:42px;padding:15px 4px 3px;font-size:.72rem;color:#c8d4cf;border-color:#475851}.chain-cell::before{content:attr(data-index);position:absolute;top:3px;left:6px;font-size:.57rem;color:#82938b}.chain-cell.empty{border-style:dashed;color:#819088}.chain-cell.active{border-color:#54d8f0;box-shadow:0 0 0 1px rgba(84,216,240,.28)}.chain-name,.tile-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .schedule-controls{margin-top:auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) minmax(54px,.68fr);gap:5px;align-items:stretch}
+    .schedule-controls button{min-height:40px;border-radius:9px;font-size:.73rem;font-weight:900;background:#34423c}
+    .loop-control{display:grid;grid-template-columns:36px 1fr;gap:4px}.loop-gear{font-size:1rem;background:#42524b!important}.loop-start{background:#126b4b!important}.log-open{background:#30566e!important}
+    .right-panel{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:7px;padding:9px;overflow:hidden}
+    .catalog{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:7px;overflow:hidden}
+    .module-groups{min-width:0;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:6px;padding-right:2px}
+    .module-group{min-width:0;background:rgba(24,36,31,.74);border:1px solid rgba(153,184,170,.13);border-radius:10px;padding:6px}
+    .group-title{font-size:.68rem;font-weight:900;color:#c3d2cc;margin:0 2px 5px}
+    .group-modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+    .module{height:42px;min-height:42px;padding:5px;font-size:.67rem;color:#eef5f2}.module:hover{border-color:#61746b}.module:active{background:#0e5a43}
+    .preset-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px;border-top:1px solid rgba(153,184,170,.2);padding-top:7px}
+    .preset{height:42px;min-height:42px;padding:15px 3px 3px;font-size:.63rem;color:#dce7e2;background:#116b62;border-color:#268a7f}.preset::before{content:attr(data-index);position:absolute;top:3px;left:6px;font-size:.55rem;color:#a6efe7}.preset.empty{background:#254f70;border-color:#3978a7;color:#b9d5e8}.preset.loaded{box-shadow:0 0 0 2px var(--green)}
+    .action-rail{display:flex;flex-direction:column;gap:5px;min-height:0}.rail-btn{width:100%;padding:5px 2px;font-size:.72rem;min-height:42px}.rail-btn.timed{background:var(--yellow);color:#231700}.rail-btn.play{background:#18a760}.rail-btn.clear{background:#5c6561}.rail-btn.stop{background:#d92323}.rail-btn.close{background:#333d39;font-size:1.15rem}
+    .toast{position:fixed;left:50%;bottom:calc(12px + var(--safe-b));z-index:80;max-width:78vw;transform:translate(-50%,18px);opacity:0;pointer-events:none;border-radius:10px;background:#e7eee9;color:#102019;padding:9px 14px;font-size:.76rem;font-weight:800;box-shadow:0 10px 35px rgba(0,0,0,.5);transition:.18s}.toast.show{opacity:1;transform:translate(-50%,0)}.toast.error{background:#ffb4ae;color:#4d0b08}.toast.ok{background:#a7f3c9;color:#06351c}
+    .overlay{display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:12px}.overlay.open{display:flex}
+    .sheet{width:min(820px,96vw);max-height:90vh;overflow-y:auto;border:1px solid #42534b;border-radius:14px;background:#101a17;padding:13px;box-shadow:0 22px 70px rgba(0,0,0,.58)}
+    .sheet.wide{width:min(1120px,97vw)}
+    .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.sheet-head h2{font-size:1rem}.sheet-close{width:38px;height:34px;border-radius:8px;background:#34423c;font-weight:900}
+    .form-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center}.form-grid label{font-size:.75rem;color:#b7c6bf;font-weight:800}.form-grid input{width:100%;min-height:39px;border:1px solid #52635b;border-radius:8px;background:#0a110f;color:#fff;padding:7px 9px}.hint{font-size:.7rem;color:#9eafa7;line-height:1.5;margin:8px 0}.summary{border-radius:8px;background:#1a2823;padding:8px;font-size:.72rem;line-height:1.55;color:#c8d6d0;margin-bottom:9px;word-break:break-word}.sheet-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:11px}.sheet-btn{background:#33433c}.sheet-btn.primary{background:#16965a}.sheet-btn.warn{background:var(--yellow);color:#2a1b00}.sheet-btn.danger{background:#b6362d}
+    .scheduled-list{display:flex;flex-direction:column;gap:6px}.scheduled-item{display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:7px;align-items:center;border:1px solid #34453d;border-radius:9px;background:#18241f;padding:7px}.scheduled-item .slot-tag{font-weight:900;color:#8ff0bc}.scheduled-item small{display:block;color:#9aaca4;margin-top:3px}.scheduled-item button{border-radius:7px;background:#a9352d;padding:7px 10px;font-weight:900}.empty-message{padding:22px 8px;text-align:center;color:#8fa098;font-size:.78rem}
+    .log-table{display:grid;grid-template-columns:58px minmax(0,1.35fr) minmax(0,1fr);border:1px solid #34453d;border-radius:10px;overflow:hidden}.log-cell{min-height:42px;padding:7px;border-right:1px solid #34453d;border-bottom:1px solid #34453d;font-size:.68rem;line-height:1.45;word-break:break-word}.log-cell:nth-child(3n){border-right:0}.log-head{min-height:30px;background:#23332c;color:#b8c9c1;font-weight:900}.log-slot{font-weight:900;color:#83eeb4;text-align:center}.log-muted{color:#71847b}.log-entry+.log-entry{margin-top:5px;padding-top:5px;border-top:1px dashed #42544b}
+    @media(max-width:820px) and (orientation:portrait){html,body{overflow:auto}#app{height:auto;min-height:100%}.playback-board{height:auto;grid-template-columns:1fr}.right-panel{min-height:650px}.schedule-controls{margin-top:0}.preset-grid{grid-template-columns:repeat(5,1fr)}}
+    @media(max-height:500px){.left-panel{gap:5px;padding:7px}.slot,.chain-cell{min-height:35px;height:35px}.chain-cell{padding-top:12px}.compact-btn,.schedule-controls button{min-height:33px}.right-panel{padding:7px}.module{height:36px;min-height:36px}.preset{height:38px;min-height:38px}.rail-btn{min-height:36px}.group-title{margin-bottom:3px}}
+  </style>
+</head>
+<body>
+<div id="app">
+  <main class="playback-board">
+    <aside class="panel left-panel">
+      <div class="slot-grid" id="slots"></div>
+      <div class="dual-actions">
+        <button class="compact-btn on" id="start-all">全開</button>
+        <button class="compact-btn off" id="close-all">全關</button>
+      </div>
+      <div class="chain-grid" id="chain"></div>
+      <div class="schedule-controls">
+        <button id="scheduled-settings">定時設定</button>
+        <div class="loop-control">
+          <button class="loop-gear" id="loop-settings" aria-label="循環設定">⚙</button>
+          <button class="loop-start" id="loop-start">循環播放</button>
+        </div>
+        <button class="log-open" id="log-open">LOG</button>
+      </div>
+    </aside>
+
+    <section class="panel right-panel">
+      <div class="catalog">
+        <div class="module-groups" id="module-groups"></div>
+        <div class="preset-grid" id="preset-grid"></div>
+      </div>
+      <div class="action-rail">
+        <button class="rail-btn timed" id="scheduled-play">定時播放</button>
+        <button class="rail-btn play" id="play-chain">播放</button>
+        <button class="rail-btn clear" id="clear-chain">清除</button>
+        <button class="rail-btn stop" id="stop-all">全止</button>
+        <button class="rail-btn close" id="close-panel" aria-label="關閉">×</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="overlay" id="loop-overlay">
+  <section class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2>循環播放設定</h2><button class="sheet-close" data-close="loop-overlay">×</button></div>
+    <div class="form-grid">
+      <label for="loop-count">循環次數</label><input id="loop-count" type="number" inputmode="numeric" min="1" step="1" placeholder="留空代表一直循環" />
+      <label for="loop-cooldown">每輪冷卻秒數</label><input id="loop-cooldown" type="number" inputmode="numeric" min="0" max="86400" step="1" value="30" />
+    </div>
+    <p class="hint">完整播放目前模組連串後才計一次；最後一次完成後不再冷卻。冷卻可設定 3600 秒或更長。</p>
+    <div class="sheet-actions"><button class="sheet-btn primary" id="save-loop-settings">儲存設定</button></div>
+  </section>
+</div>
+
+<div class="overlay" id="scheduled-create-overlay">
+  <section class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2>建立定時播放</h2><button class="sheet-close" data-close="scheduled-create-overlay">×</button></div>
+    <div class="summary" id="scheduled-summary"></div>
+    <div class="form-grid">
+      <label for="scheduled-date">日期</label><input id="scheduled-date" type="date" />
+      <label for="scheduled-time">台北時間</label><input id="scheduled-time" type="time" step="1" />
+    </div>
+    <p class="hint">以 Windows 主機的台北時間（UTC+08:00）為準。已過去的時間不會建立。</p>
+    <div class="sheet-actions"><button class="sheet-btn warn" id="create-scheduled">建立定時命令</button></div>
+  </section>
+</div>
+
+<div class="overlay" id="scheduled-settings-overlay">
+  <section class="sheet wide" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2>定時設定：等待中的命令</h2><button class="sheet-close" data-close="scheduled-settings-overlay">×</button></div>
+    <div class="scheduled-list" id="scheduled-list"></div>
+  </section>
+</div>
+
+<div class="overlay" id="log-overlay">
+  <section class="sheet wide" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2>定時／循環狀態</h2><button class="sheet-close" data-close="log-overlay">×</button></div>
+    <div class="log-table" id="automation-log"></div>
+  </section>
+</div>
+
+<div class="overlay" id="preset-overlay">
+  <section class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2 id="preset-title">編輯連串預設</h2><button class="sheet-close" data-close="preset-overlay">×</button></div>
+    <div class="form-grid"><label for="preset-name">名稱</label><input id="preset-name" maxlength="40" /></div>
+    <div class="summary" id="preset-summary" style="margin-top:9px"></div>
+    <p class="hint">長按的預設會用目前 1–10 格模組連串覆蓋；點一下仍只載入。</p>
+    <div class="sheet-actions"><button class="sheet-btn primary" id="save-preset">儲存目前連串</button></div>
+  </section>
+</div>
+
+<script>
+const mobileIndex=location.pathname.indexOf('/mobile/');
+const basePath=mobileIndex>=0?location.pathname.slice(0,mobileIndex):'';
+const CHAIN_SIZE=10;
+const MAX_SLOT=20;
+const LOOP_SETTINGS_KEY='gui_test_pc_loop_settings_v1';
+const state={slots:[],targets:[],selected:new Set(),modules:{},groups:[],chain:new Array(CHAIN_SIZE).fill(null),jobs:[],gui:null,presets:[],automations:[],catalogSignature:'',insertion:{position:0,start:1,mode:'index',activeCell:1},activePreset:null,editingPreset:null};
+const $=id=>document.getElementById(id);
+let toastTimer=0;
+
+async function api(path,options={}){
+  const opts={...options,headers:{...(options.headers||{})}};
+  if(opts.body)opts.headers['Content-Type']='application/json';
+  const response=await fetch(`${basePath}${path}`,opts);
+  const text=await response.text();
+  let data;
+  try{data=text?JSON.parse(text):{}}catch{data={ok:false,error:text}}
+  if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
+  return data;
+}
+
+function showToast(text,kind=''){
+  const node=$('toast');
+  node.textContent=text;node.className=`toast ${kind} show`;
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.className='toast',2800);
+}
+
+function openOverlay(id){$(id).classList.add('open')}
+function closeOverlay(id){$(id).classList.remove('open')}
+document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>closeOverlay(button.dataset.close));
+document.querySelectorAll('.overlay').forEach(node=>node.onclick=event=>{if(event.target===node)closeOverlay(node.id)});
+
+function guiHeartbeatFresh(){
+  const updated=Date.parse(state.gui?.updated_at||'');
+  return Number.isFinite(updated)&&Date.now()-updated<12000;
+}
+
+function latestRunningSlots(){
+  if(guiHeartbeatFresh())return new Set((state.gui.running_slots||[]).map(Number));
+  return new Set(state.slots.filter(row=>row.running).map(row=>Number(row.slot)));
+}
+
+function activeLoopForSlot(slot){
+  return state.automations.find(job=>job.mode==='loop'&&['waiting','running','cooling'].includes(job.status)&&(job.slots||[]).map(Number).includes(slot));
+}
+
+function latestPlayingSlots(){
+  const playing=new Set(guiHeartbeatFresh()?(state.gui.playing_slots||[]).map(Number):[]);
+  state.automations.filter(job=>job.status==='running').forEach(job=>(job.slots||[]).forEach(slot=>playing.add(Number(slot))));
+  return playing;
+}
+
+function renderSlots(){
+  const root=$('slots');root.innerHTML='';
+  const running=latestRunningSlots();
+  const playing=latestPlayingSlots();
+  for(let slot=1;slot<=MAX_SLOT;slot++){
+    const loop=activeLoopForSlot(slot);
+    const button=document.createElement('button');
+    button.className=`slot ${running.has(slot)?'running':'offline'} ${state.selected.has(slot)?'selected':''} ${(playing.has(slot)||loop)?'playing':''} ${loop?'looping':''}`;
+    button.textContent=String(slot).padStart(2,'0');
+    button.title=loop?'循環播放中，點擊中止整個循環':playing.has(slot)?'播放中，點擊中止此 Slot':running.has(slot)?'在線':'離線';
+    button.onclick=()=>{
+      if(playing.has(slot)||loop){stopSlot(slot).catch(error=>showToast(error.message,'error'));return}
+      state.selected.has(slot)?state.selected.delete(slot):state.selected.add(slot);
+      renderSlots();
+    };
+    root.appendChild(button);
+  }
+}
+
+function chainValues(){return state.chain.filter(Boolean)}
+function chainStart(){const first=state.chain.findIndex(Boolean);return first===0?0:1}
+function packChain(values,start){
+  const packed=new Array(CHAIN_SIZE).fill(null);
+  const actualStart=values.length===CHAIN_SIZE?0:Math.max(0,Math.min(start,CHAIN_SIZE-values.length));
+  values.forEach((name,index)=>{packed[actualStart+index]=name});
+  state.chain=packed;
+  return actualStart;
+}
+
+function renderChain(){
+  const root=$('chain');root.innerHTML='';
+  state.chain.forEach((name,index)=>{
+    const button=document.createElement('button');
+    button.className=`chain-cell ${name?'':'empty'} ${state.insertion?.activeCell===index?'active':''}`;
+    button.dataset.index=String(index+1);
+    button.title=name||`從第 ${index+1} 格插入`;
+    button.innerHTML=name?`<span class="chain-name">${escapeHtml(name)}</span>`:'<span>＋</span>';
+    button.onclick=()=>selectChainCell(index);
+    root.appendChild(button);
+  });
+}
+
+function selectChainCell(index){
+  if(state.chain[index]){
+    state.chain[index]=null;
+    state.insertion=null;
+    renderChain();
+    return;
+  }
+  const position=state.chain.slice(0,index).filter(Boolean).length;
+  state.insertion={position,index,start:index===0?0:chainStart(),mode:index===0?'head':index===9?'tail':'index',activeCell:index};
+  renderChain();
+}
+
+function insertModules(names){
+  const additions=names.map(String).map(name=>name.trim()).filter(Boolean);
+  if(!additions.length)return;
+  const values=chainValues();
+  if(values.length+additions.length>CHAIN_SIZE){showToast('加入後會超過 10 個模組，本次未加入。','error');return}
+  if(!state.insertion)state.insertion={position:values.length,start:chainStart(),mode:'tail',activeCell:Math.min(9,chainStart()+values.length)};
+  const position=state.insertion.mode==='tail'?values.length:Math.min(state.insertion.position,values.length);
+  values.splice(position,0,...additions);
+  const preferredStart=state.insertion.mode==='head'?0:state.insertion.start;
+  const start=packChain(values,preferredStart);
+  const nextPosition=position+additions.length;
+  state.insertion={...state.insertion,position:nextPosition,start,activeCell:Math.min(9,start+nextPosition)};
+  renderChain();
+}
+
+function clearChain(){
+  state.chain=new Array(CHAIN_SIZE).fill(null);
+  state.insertion={position:0,start:1,mode:'index',activeCell:1};
+  state.activePreset=null;
+  renderChain();renderPresets();
+}
+
+function renderModules(){
+  const root=$('module-groups');root.innerHTML='';
+  const grouped=new Set();
+  const groups=state.groups.length?state.groups:[{name:'所有模組',modules:Object.keys(state.modules)}];
+  groups.forEach(group=>{
+    const names=(group.modules||[]).filter(name=>state.modules[name]);
+    if(!names.length)return;
+    names.forEach(name=>grouped.add(name));
+    const section=document.createElement('section');section.className='module-group';
+    section.innerHTML=`<div class="group-title">${escapeHtml(group.name||'未分組')}</div><div class="group-modules"></div>`;
+    const grid=section.querySelector('.group-modules');
+    names.forEach(name=>grid.appendChild(moduleButton(name)));
+    root.appendChild(section);
+  });
+  const ungrouped=Object.keys(state.modules).filter(name=>!grouped.has(name)).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  if(ungrouped.length){
+    const section=document.createElement('section');section.className='module-group';
+    section.innerHTML='<div class="group-title">未分組</div><div class="group-modules"></div>';
+    const grid=section.querySelector('.group-modules');ungrouped.forEach(name=>grid.appendChild(moduleButton(name)));root.appendChild(section);
+  }
+  if(!root.children.length)root.innerHTML='<div class="empty-message">沒有可用模組</div>';
+}
+
+function moduleButton(name){
+  const button=document.createElement('button');button.className='module';button.title=name;button.setAttribute('aria-label',name);
+  button.innerHTML=`<span class="tile-name">${escapeHtml(name)}</span>`;
+  button.onclick=()=>insertModules([name]);
+  return button;
+}
+
+function renderPresets(){
+  const root=$('preset-grid');root.innerHTML='';
+  for(let index=1;index<=20;index++){
+    const preset=state.presets.find(item=>Number(item.index)===index)||{index,name:`連串 ${index}`,modules:[]};
+    const button=document.createElement('button');
+    button.className=`preset ${(preset.modules||[]).length?'':'empty'} ${state.activePreset===index?'loaded':''}`;
+    button.dataset.index=String(index);button.title=preset.name||`連串 ${index}`;
+    button.innerHTML=`<span class="tile-name">${escapeHtml(preset.name||`連串 ${index}`)}</span>`;
+    let timer=0,longPressed=false;
+    const begin=()=>{longPressed=false;timer=setTimeout(()=>{longPressed=true;openPresetEditor(index)},600)};
+    const end=()=>{clearTimeout(timer)};
+    button.addEventListener('pointerdown',begin);button.addEventListener('pointerup',end);button.addEventListener('pointercancel',end);button.addEventListener('pointerleave',end);
+    button.onclick=()=>{if(longPressed){longPressed=false;return}loadPreset(index)};
+    root.appendChild(button);
+  }
+}
+
+function loadPreset(index){
+  const preset=state.presets.find(item=>Number(item.index)===index);
+  if(!preset||(preset.modules||[]).length===0){showToast('這個連串預設目前是空的。','error');return}
+  packChain((preset.modules||[]).slice(0,CHAIN_SIZE),0);
+  state.insertion=null;state.activePreset=index;renderChain();renderPresets();
+  showToast(`已載入 ${preset.name}`,'ok');
+}
+
+function openPresetEditor(index){
+  const preset=state.presets.find(item=>Number(item.index)===index)||{index,name:`連串 ${index}`,modules:[]};
+  state.editingPreset=index;$('preset-title').textContent=`編輯連串預設 ${index}`;$('preset-name').value=preset.name||`連串 ${index}`;
+  const values=chainValues();$('preset-summary').textContent=values.length?`目前連串：${values.join(' > ')}`:'目前連串為空，不能覆蓋預設。';$('save-preset').disabled=!values.length;
+  openOverlay('preset-overlay');
+}
+
+async function savePreset(){
+  const index=state.editingPreset;const modules=chainValues();
+  if(!index||!modules.length)return;
+  const name=$('preset-name').value.trim()||`連串 ${index}`;
+  const data=await api(`/api/module-chain-presets/${index}`,{method:'POST',body:JSON.stringify({name,modules})});
+  state.presets=data.presets||state.presets;state.activePreset=index;renderPresets();closeOverlay('preset-overlay');showToast('連串預設已儲存。','ok');
+}
+
+function selectedPayload(){
+  const slots=[...state.selected].sort((a,b)=>a-b);const modules=chainValues();
+  if(!slots.length)throw new Error('請先選擇至少一個 Slot。');
+  if(!modules.length)throw new Error('請先選擇至少一個模組。');
+  return{slots,modules};
+}
+
+async function playChain(){
+  const payload=selectedPayload();
+  await api('/api/play/module-chain',{method:'POST',body:JSON.stringify(payload)});
+  showToast('播放命令已交給 GUI_TEST_PC。','ok');setTimeout(refreshStatus,300);
+}
+
+function loadLoopSettings(){
+  try{const data=JSON.parse(localStorage.getItem(LOOP_SETTINGS_KEY)||'{}');return{repeatCount:data.repeatCount??'',cooldown:Number.isFinite(Number(data.cooldown))?Number(data.cooldown):30}}catch{return{repeatCount:'',cooldown:30}}
+}
+
+function openLoopSettings(){
+  const settings=loadLoopSettings();$('loop-count').value=settings.repeatCount;$('loop-cooldown').value=String(settings.cooldown);openOverlay('loop-overlay');
+}
+
+function saveLoopSettings(){
+  const rawCount=$('loop-count').value.trim();const cooldown=Number($('loop-cooldown').value);
+  if(rawCount!==''&&(!Number.isInteger(Number(rawCount))||Number(rawCount)<=0)){showToast('循環次數必須是正整數或留空。','error');return}
+  if(!Number.isInteger(cooldown)||cooldown<0||cooldown>86400){showToast('冷卻秒數必須是 0–86400 的整數。','error');return}
+  localStorage.setItem(LOOP_SETTINGS_KEY,JSON.stringify({repeatCount:rawCount===''?'':Number(rawCount),cooldown}));closeOverlay('loop-overlay');showToast('循環設定已儲存。','ok');
+}
+
+async function startLoop(){
+  const payload=selectedPayload();const settings=loadLoopSettings();
+  await api('/api/play/automation',{method:'POST',body:JSON.stringify({mode:'loop',target_kind:'module_chain',...payload,cooldown_seconds:settings.cooldown,repeat_count:settings.repeatCount===''?null:Number(settings.repeatCount)})});
+  showToast('循環播放命令已交給 GUI_TEST_PC。','ok');setTimeout(refreshStatus,350);
+}
+
+function taipeiParts(date=new Date(Date.now()+60000)){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+  return Object.fromEntries(parts.filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
+}
+
+function openScheduledCreate(){
+  let payload;try{payload=selectedPayload()}catch(error){showToast(error.message,'error');return}
+  const parts=taipeiParts();$('scheduled-date').value=`${parts.year}-${parts.month}-${parts.day}`;$('scheduled-time').value=`${parts.hour}:${parts.minute}:${parts.second}`;
+  $('scheduled-summary').textContent=`Slot ${payload.slots.join(', ')}｜${payload.modules.join(' > ')}`;openOverlay('scheduled-create-overlay');
+}
+
+async function createScheduled(){
+  const payload=selectedPayload();const date=$('scheduled-date').value;let clock=$('scheduled-time').value;
+  if(!date||!clock){showToast('請完整選擇日期與台北時間。','error');return}
+  if(clock.length===5)clock+=':00';const runAt=`${date}T${clock}+08:00`;
+  if(Date.parse(runAt)<=Date.now()){showToast('定時播放時間必須晚於目前台北時間。','error');return}
+  await api('/api/play/automation',{method:'POST',body:JSON.stringify({mode:'scheduled_once',target_kind:'module_chain',...payload,run_at:runAt})});
+  closeOverlay('scheduled-create-overlay');showToast('定時命令已建立並交給 GUI_TEST_PC。','ok');setTimeout(refreshStatus,350);
+}
+
+function formatTaipei(value){
+  const date=new Date(value);if(Number.isNaN(date.getTime()))return String(value||'');
+  return new Intl.DateTimeFormat('zh-Hant',{timeZone:'Asia/Taipei',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(date);
+}
+
+function automationTarget(job){return job.target_kind==='script'?String(job.script||''):(job.modules||[]).join(' > ')}
+
+function renderScheduledSettings(){
+  const root=$('scheduled-list');root.innerHTML='';
+  const jobs=state.automations.filter(job=>job.mode==='scheduled_once'&&job.status==='waiting').sort((a,b)=>Number(a.run_at||0)-Number(b.run_at||0));
+  jobs.forEach(job=>{
+    const slot=(job.slots||[])[0];const item=document.createElement('div');item.className='scheduled-item';
+    item.innerHTML=`<div class="slot-tag">SLOT ${slot}</div><div>${escapeHtml(automationTarget(job))}<small>台北時間 ${escapeHtml(formatTaipei(job.run_at_iso||Number(job.run_at)*1000))}</small></div>`;
+    const button=document.createElement('button');button.textContent='刪除';button.onclick=()=>cancelAutomation(job.id).catch(error=>showToast(error.message,'error'));
+    item.appendChild(button);root.appendChild(item);
+  });
+  if(!jobs.length)root.innerHTML='<div class="empty-message">目前沒有等待中的定時播放命令。</div>';
+}
+
+function loopStatusText(job){
+  const completed=Number(job.iteration||0);const total=job.repeat_count==null?'∞':String(job.repeat_count);
+  let text=`循環播放中｜${completed}/${total}`;
+  if(job.status==='running')text=`循環播放中｜第 ${completed+1}/${total} 次`;
+  if(job.status==='cooling'){
+    const remaining=Math.max(0,Math.ceil(Number(job.next_run_at||0)-Date.now()/1000));
+    text+=`｜下輪 ${remaining}s`;
+  }
+  return text;
+}
+
+function renderAutomationLog(){
+  const root=$('automation-log');root.innerHTML='<div class="log-cell log-head">Slot</div><div class="log-cell log-head">定時播放</div><div class="log-cell log-head">循環播放</div>';
+  for(let slot=1;slot<=MAX_SLOT;slot++){
+    const scheduled=state.automations.filter(job=>job.mode==='scheduled_once'&&['waiting','running'].includes(job.status)&&(job.slots||[]).map(Number).includes(slot)).sort((a,b)=>Number(a.run_at||0)-Number(b.run_at||0));
+    const loop=activeLoopForSlot(slot);
+    const slotCell=document.createElement('div');slotCell.className='log-cell log-slot';slotCell.textContent=String(slot).padStart(2,'0');root.appendChild(slotCell);
+    const scheduledCell=document.createElement('div');scheduledCell.className='log-cell';
+    if(scheduled.length)scheduled.forEach(job=>{const line=document.createElement('div');line.className='log-entry';line.innerHTML=`<b>${job.status==='running'?'播放中':'等待中'}</b>｜${escapeHtml(formatTaipei(job.run_at_iso||Number(job.run_at)*1000))}<br>${escapeHtml(automationTarget(job))}`;scheduledCell.appendChild(line)});else scheduledCell.innerHTML='<span class="log-muted">—</span>';
+    root.appendChild(scheduledCell);
+    const loopCell=document.createElement('div');loopCell.className='log-cell';loopCell.innerHTML=loop?`<b>${escapeHtml(loopStatusText(loop))}</b><br>${escapeHtml(automationTarget(loop))}`:'<span class="log-muted">—</span>';root.appendChild(loopCell);
+  }
+}
+
+async function cancelAutomation(id){
+  await api('/api/play/automation/cancel',{method:'POST',body:JSON.stringify({id})});
+  showToast('已傳送刪除定時命令。','ok');setTimeout(refreshStatus,350);
+}
+
+async function stopSlot(slot){
+  await api('/api/play/stop-slot',{method:'POST',body:JSON.stringify({slot})});
+  showToast(`已要求中止 Slot ${slot}。`,'ok');setTimeout(refreshStatus,350);
+}
+
+async function stopAll(){
+  await api('/api/play/stop-all',{method:'POST',body:'{}'});showToast('已要求中止所有正在播放及循環工作。','ok');setTimeout(refreshStatus,350);
+}
+
+async function launcher(action){
+  await api(`/api/starcg/${action}`,{method:'POST',body:JSON.stringify({slots:Array.from({length:MAX_SLOT},(_,index)=>index+1),forcebind_mode:'netbind',use_windows_users:true})});
+  showToast(action==='start-missing'?'全開命令已交給 GUI_TEST_PC。':'全關命令已交給 GUI_TEST_PC。','ok');
+}
+
+async function refreshStatus(){
+  const [targets,modules,groups,presets,jobs]=await Promise.all([api('/api/targets'),api('/api/modules'),api('/api/module-groups'),api('/api/module-chain-presets'),api('/api/play/jobs')]);
+  state.slots=targets.target_slots||[];state.targets=targets.targets||[];state.jobs=jobs.jobs||[];state.gui=jobs.gui||null;
+  const nextModules=modules.modules||{};const nextGroups=groups.groups||[];const nextPresets=presets.presets||[];
+  const signature=JSON.stringify([nextModules,nextGroups,nextPresets]);
+  if(signature!==state.catalogSignature){state.catalogSignature=signature;state.modules=nextModules;state.groups=nextGroups;state.presets=nextPresets;renderModules();renderPresets()}
+  state.automations=(state.gui?.playback_automations||[]).filter(job=>['waiting','running','cooling'].includes(job.status));
+  renderSlots();renderScheduledSettings();renderAutomationLog();
+}
+
+function escapeHtml(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+
+$('start-all').onclick=()=>launcher('start-missing').catch(error=>showToast(error.message,'error'));
+$('close-all').onclick=()=>launcher('stop').catch(error=>showToast(error.message,'error'));
+$('clear-chain').onclick=clearChain;
+$('play-chain').onclick=()=>playChain().catch(error=>showToast(error.message,'error'));
+$('stop-all').onclick=()=>stopAll().catch(error=>showToast(error.message,'error'));
+$('loop-settings').onclick=openLoopSettings;
+$('save-loop-settings').onclick=saveLoopSettings;
+$('loop-start').onclick=()=>startLoop().catch(error=>showToast(error.message,'error'));
+$('scheduled-play').onclick=openScheduledCreate;
+$('create-scheduled').onclick=()=>createScheduled().catch(error=>showToast(error.message,'error'));
+$('scheduled-settings').onclick=()=>{renderScheduledSettings();openOverlay('scheduled-settings-overlay')};
+$('log-open').onclick=()=>{renderAutomationLog();openOverlay('log-overlay')};
+$('save-preset').onclick=()=>savePreset().catch(error=>showToast(error.message,'error'));
+$('close-panel').onclick=()=>{window.parent.postMessage({type:'gui-test-pc-close-module-panel'},'*');if(history.length>1)history.back();else location.assign(`${basePath}/`)};
+
+renderChain();
+if('serviceWorker'in navigator)navigator.serviceWorker.register(`${basePath}/mobile/sw.js`).catch(()=>{});
+refreshStatus().catch(error=>showToast(`連線失敗：${error.message}`,'error'));
+setInterval(()=>refreshStatus().catch(()=>{}),2000);
+</script>
+</body>
+</html>

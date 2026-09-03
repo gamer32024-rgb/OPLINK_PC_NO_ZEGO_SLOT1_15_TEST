@@ -1,0 +1,34 @@
+{
+  "snapshot_version": "2026-09-04",
+  "purpose": "Source snapshot of the live GUI_TEST_PC, OPLINK_720P support components, Pico firmware, and isolated asset-inventory handoff.",
+  "oplink_repository_commit": "4d01e628a25bd4e92a2a315dc81d99607018d774",
+  "source_roots": {
+    "gui_test_pc": "C:\\Users\\andyb\\Documents\\New project\\GUI_TEST_PC_DEV_20260703",
+    "shared_python": "C:\\Users\\andyb\\Documents\\New project\\src\\starcg_bot",
+    "pico_h_touch": "C:\\Users\\andyb\\Documents\\New project\\PICO_H_TOUCH",
+    "oplink_repo": "C:\\Users\\andyb\\Documents\\New project\\OPLINK_PC_NO_ZEGO_SLOT1_15_TEST"
+  },
+  "captured_utc": "2026-09-03T23:25:23.6647655Z",
+  "binary_fingerprints": [
+    {
+      "file": "C:\\Users\\andyb\\Documents\\New project\\GUI_TEST_PC_DEV_20260703\\netbind_pc\\build_ninja\\GuiTestNetBindLauncher.exe",
+      "bytes": 701952,
+      "sha256": "3B8BA9F05F2181E5A054A4ECA3E81E896C8C9319892EE238211D43F68CEE8186"
+    },
+    {
+      "file": "C:\\Users\\andyb\\Documents\\New project\\GUI_TEST_PC_DEV_20260703\\netbind_pc\\build_ninja\\GuiTestNetBindHook64.dll",
+      "bytes": 681472,
+      "sha256": "B6BDBC608C7EFABC1A4BA731D434543DE15F76208C496A0F741F2D050030760A"
+    },
+    {
+      "file": "C:\\Users\\andyb\\Documents\\New project\\PICO_H_TOUCH\\artifacts\\pico_h_phase3_composite_touch_0.3.2_scan_time_fix.uf2",
+      "bytes": 68608,
+      "sha256": "9B2A7BD502E31C9E2A943AEEC5876C4EEC55286C4244B3F0365C62EDCE8B5344"
+    }
+  ],
+  "exclusions": [
+    "Account credentials and login presets",
+    "Windows user mappings and adapter-specific NetBind configuration",
+    "Live schedules, jobs, runtime state, logs, diagnostics, backups, screenshots, keys, certificates, and build outputs"
+  ]
+}

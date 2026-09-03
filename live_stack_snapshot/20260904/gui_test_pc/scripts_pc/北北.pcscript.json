@@ -1,0 +1,112 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-29T23:21:25+08:00",
+  "target": {
+    "hwnd": 44893680,
+    "hwnd_hex": "0x2AD05F0",
+    "pid": 44652,
+    "title": "[02] 「星詠魔力 - 二無極5」「S1雙子 - 雙子一」「Lv.76 Hp:1776/1776 Mp:505」",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 44652,
+    "slot": 2,
+    "target_id": "slot:2",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 183109,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 1031,
+      "x": 1758,
+      "y": 1009,
+      "button": "left",
+      "duration_ms": 65
+    },
+    {
+      "type": "click",
+      "t_ms": 3076,
+      "x": 1651,
+      "y": 786,
+      "button": "left",
+      "duration_ms": 65
+    },
+    {
+      "type": "click",
+      "t_ms": 4474,
+      "x": 815,
+      "y": 653,
+      "button": "left",
+      "duration_ms": 65
+    },
+    {
+      "type": "click",
+      "t_ms": 7080,
+      "x": 1697,
+      "y": 202,
+      "button": "left",
+      "duration_ms": 53
+    },
+    {
+      "type": "click",
+      "t_ms": 8719,
+      "x": 387,
+      "y": 264,
+      "button": "left",
+      "duration_ms": 75
+    },
+    {
+      "type": "drag_start",
+      "t_ms": 10341,
+      "x": 1374,
+      "y": 340,
+      "button": "left",
+      "drag_id": "drag_0006",
+      "forced_drag": false
+    },
+    {
+      "type": "drag_move",
+      "t_ms": 10362,
+      "x": 1375,
+      "y": 339,
+      "drag_id": "drag_0006"
+    },
+    {
+      "type": "drag_end",
+      "t_ms": 10384,
+      "x": 1375,
+      "y": 339,
+      "button": "left",
+      "drag_id": "drag_0006",
+      "duration_ms": 43
+    },
+    {
+      "type": "click",
+      "t_ms": 11904,
+      "x": 907,
+      "y": 379,
+      "button": "left",
+      "duration_ms": 22
+    },
+    {
+      "type": "click",
+      "t_ms": 13419,
+      "x": 980,
+      "y": 250,
+      "button": "left",
+      "duration_ms": 76
+    }
+  ]
+}

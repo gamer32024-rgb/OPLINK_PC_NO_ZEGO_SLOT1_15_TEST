@@ -1,0 +1,30 @@
+{
+  "enabled": true,
+  "port": "COM5",
+  "coordinate_policy": "starcg_4k_stacked_720p_pico_v2",
+  "report_mode": "touchscreen",
+  "touch_surface": {
+    "left": 0,
+    "top": 0,
+    "width": 3840,
+    "height": 2160
+  },
+  "min_slot_interval_ms": 100,
+  "global_gesture_interval_ms": 100,
+  "global_click_interval_ms": 100,
+  "cross_slot_same_coordinate_min_ms": 100,
+  "cross_slot_same_coordinate_max_ms": 100,
+  "tap_hold_ms": 60,
+  "ack_timeout_ms": 1000,
+  "foreground_settle_ms": 80,
+  "script_post_hid_guard_ms": 250,
+  "move_min_interval_ms": 8,
+  "drag_release_guard_ms": 250,
+  "hid_drain_timeout_ms": 1500,
+  "live_resume_interval_ms": 50,
+  "drag_hold_before_ms": 250,
+  "drag_min_duration_ms": 1200,
+  "drag_hold_after_ms": 150,
+  "drag_resample_steps": 30,
+  "allow_unfocused_visible_target": false
+}

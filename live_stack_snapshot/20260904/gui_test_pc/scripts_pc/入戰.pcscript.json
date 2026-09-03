@@ -1,0 +1,47 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-19T09:39:33+08:00",
+  "target": {
+    "hwnd": 329002,
+    "hwnd_hex": "0x5052A",
+    "pid": 1368,
+    "title": "「星詠魔力 - 男五」「S1雙子 - 雙子一」「Lv.100 Hp:2127/2127 Mp:1653」",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 1368,
+    "slot": 1,
+    "target_id": "slot:1",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 4511,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 972,
+      "x": 1763,
+      "y": 1019,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 2608,
+      "x": 1620,
+      "y": 633,
+      "button": "left",
+      "duration_ms": 74
+    }
+  ]
+}

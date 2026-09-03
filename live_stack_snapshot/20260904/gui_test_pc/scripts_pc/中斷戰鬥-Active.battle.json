@@ -1,0 +1,151 @@
+{
+  "format": "gui_test_pc_battle_interrupt_v1",
+  "version": 1,
+  "mode": "active",
+  "allowed_slots": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "expected_client": {
+    "w": 1280,
+    "h": 720
+  },
+  "capture": {
+    "provider": "wgc_router",
+    "router_path": "../tools_pc/battle_capture_router.exe",
+    "fps": 12,
+    "startup_timeout_sec": 5.0,
+    "frame_timeout_sec": 2.0
+  },
+  "poll_ms": 100,
+  "click_hold_sec": 0.06,
+  "capture_root": "D:/GUI_TEST_PC_BATTLE_CAPTURE",
+  "capture_cleanup": {
+    "daily": true,
+    "marker": ".gui_test_pc_battle_capture_root"
+  },
+  "capture_hash_distance_min": 8,
+  "policy": {
+    "state_window": 3,
+    "state_votes": 2,
+    "action_consecutive_frames": 2,
+    "success_consecutive_frames": 2,
+    "control_timeout_sec": 35.0,
+    "cancel_click_delay_sec": 1.5,
+    "menu_timeout_sec": 3.0,
+    "more_retry_interval_sec": 1.0,
+    "max_more_attempts": 1,
+    "next_battle_timeout_sec": 12.0,
+    "timer_clear_confirm_sec": 12.0,
+    "max_current_battle_sec": 120.0,
+    "total_timeout_sec": 600.0,
+    "max_battle_attempts": 10
+  },
+  "transition": {
+    "black_pixel_max": 20,
+    "black_ratio_min": 0.8,
+    "motion_score_min": 0.15
+  },
+  "signals": {
+    "world_anchor": {
+      "roi": [1193, 431, 1278, 515],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/world_anchor.png",
+          "threshold": 0.7
+        }
+      ]
+    },
+    "result_anchor": {
+      "roi": [254, 93, 1027, 160],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/result_anchor.png",
+          "threshold": 0.82
+        }
+      ]
+    },
+    "battle_anchor": {
+      "roi": [1110, 31, 1248, 59],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/battle_round_01.png",
+          "threshold": 0.7
+        }
+      ]
+    },
+    "timer_visible": {
+      "roi": [1028, 544, 1164, 584],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/timer_clear.png",
+          "threshold": 0.78
+        },
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/timer_result.png",
+          "threshold": 0.78
+        }
+      ]
+    },
+    "more_visible": {
+      "roi": [1084, 625, 1179, 719],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/more_button.png",
+          "threshold": 0.86
+        }
+      ],
+      "click_point": [1132, 674]
+    },
+    "auto_visible": {
+      "roi": [1179, 625, 1280, 719],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/auto_button.png",
+          "threshold": 0.8
+        }
+      ]
+    },
+    "cancel_visible": {
+      "roi": [992, 369, 1151, 431],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/cancel_button.png",
+          "threshold": 0.84
+        }
+      ],
+      "click_point": [1074, 402]
+    },
+    "ambush_visible": {
+      "roi": [462, 232, 817, 357],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/ambush_center.png",
+          "threshold": 0.78
+        }
+      ]
+    },
+    "success_visible": {
+      "roi": [554, 190, 728, 220],
+      "templates": [
+        {
+          "path": "../templates_pc/battle_interrupt_slot1/cancel_success.png",
+          "threshold": 0.86
+        }
+      ]
+    }
+  }
+}

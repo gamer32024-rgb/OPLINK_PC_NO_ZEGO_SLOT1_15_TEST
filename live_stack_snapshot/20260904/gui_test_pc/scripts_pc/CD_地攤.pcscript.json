@@ -1,0 +1,191 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-20T23:40:02+08:00",
+  "target": {
+    "hwnd": 853554,
+    "hwnd_hex": "0xD0632",
+    "pid": 16692,
+    "title": "[15] 「星詠魔力 - 十五五5」「S1雙子 - 雙子一」「Lv.72 Hp:1374/1374 Mp:474」",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 16692,
+    "slot": 15,
+    "target_id": "slot:15",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 52025,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 1973,
+      "x": 1498,
+      "y": 247,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 3598,
+      "x": 832,
+      "y": 657,
+      "button": "left",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 6600,
+      "x": 274,
+      "y": 277,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 8189,
+      "x": 192,
+      "y": 375,
+      "button": "left",
+      "duration_ms": 95
+    },
+    {
+      "type": "click",
+      "t_ms": 9984,
+      "x": 460,
+      "y": 615,
+      "button": "left",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 11828,
+      "x": 833,
+      "y": 52,
+      "button": "left",
+      "duration_ms": 97
+    },
+    {
+      "type": "click",
+      "t_ms": 14498,
+      "x": 621,
+      "y": 789,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 15833,
+      "x": 840,
+      "y": 648,
+      "button": "left",
+      "duration_ms": 97
+    },
+    {
+      "type": "click",
+      "t_ms": 18761,
+      "x": 540,
+      "y": 447,
+      "button": "left",
+      "duration_ms": 98
+    },
+    {
+      "type": "click",
+      "t_ms": 19925,
+      "x": 809,
+      "y": 662,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 22040,
+      "x": 591,
+      "y": 241,
+      "button": "left",
+      "duration_ms": 90
+    },
+    {
+      "type": "click",
+      "t_ms": 24712,
+      "x": 589,
+      "y": 663,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 27011,
+      "x": 1029,
+      "y": 432,
+      "button": "left",
+      "duration_ms": 117
+    },
+    {
+      "type": "click",
+      "t_ms": 34295,
+      "x": 805,
+      "y": 711,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 36828,
+      "x": 1625,
+      "y": 111,
+      "button": "left",
+      "duration_ms": 95
+    },
+    {
+      "type": "click",
+      "t_ms": 39822,
+      "x": 1653,
+      "y": 1007,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 42538,
+      "x": 1293,
+      "y": 738,
+      "button": "left",
+      "duration_ms": 117
+    },
+    {
+      "type": "click",
+      "t_ms": 44535,
+      "x": 1088,
+      "y": 608,
+      "button": "left",
+      "duration_ms": 95
+    },
+    {
+      "type": "click",
+      "t_ms": 47239,
+      "x": 1499,
+      "y": 238,
+      "button": "left",
+      "duration_ms": 129
+    },
+    {
+      "type": "click",
+      "t_ms": 49030,
+      "x": 828,
+      "y": 661,
+      "button": "left",
+      "duration_ms": 108
+    }
+  ]
+}

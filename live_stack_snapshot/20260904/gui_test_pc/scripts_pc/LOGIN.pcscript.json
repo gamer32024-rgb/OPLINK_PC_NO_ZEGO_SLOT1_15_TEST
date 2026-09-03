@@ -1,0 +1,95 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-19T09:04:40+08:00",
+  "target": {
+    "hwnd": 10881122,
+    "hwnd_hex": "0xA60862",
+    "pid": 20008,
+    "title": "星詠魔力",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 20008,
+    "slot": 8,
+    "target_id": "slot:8",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 27488,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 966,
+      "x": 1662,
+      "y": 531,
+      "button": "left",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 3092,
+      "x": 667,
+      "y": 753,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 5257,
+      "x": 953,
+      "y": 755,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 8151,
+      "x": 1465,
+      "y": 843,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 14535,
+      "x": 1654,
+      "y": 1008,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 17599,
+      "x": 1283,
+      "y": 662,
+      "button": "left",
+      "duration_ms": 94
+    },
+    {
+      "type": "click",
+      "t_ms": 21152,
+      "x": 1287,
+      "y": 742,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 24805,
+      "x": 1653,
+      "y": 1010,
+      "button": "left",
+      "duration_ms": 75
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+﻿{
+  "updated_at": "2026-07-06T08:18:43+08:00",
+  "source": "GUI_TEST_PC .exe window measurement; not shared with old GUI_TEST",
+  "script_dir": "C:\\Users\\andyb\\Documents\\New project\\GUI_TEST_PC_DEV_20260703\\scripts_pc",
+  "module_path": "C:\\Users\\andyb\\Documents\\New project\\GUI_TEST_PC_DEV_20260703\\config_pc\\modules_pc.json",
+  "measurements": [
+    {
+      "slot": 3,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 1119238,
+      "hwnd_hex": "0x111406",
+      "pid": 34264,
+      "title": "[03] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        1543,
+        72,
+        2311,
+        504
+      ],
+      "window_rect_screen": [
+        1532,
+        27,
+        2322,
+        515
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 4,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 20973668,
+      "hwnd_hex": "0x1400864",
+      "pid": 30192,
+      "title": "[04] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        2318,
+        66,
+        3086,
+        498
+      ],
+      "window_rect_screen": [
+        2307,
+        21,
+        3097,
+        509
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 5,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 198310,
+      "hwnd_hex": "0x306A6",
+      "pid": 32376,
+      "title": "[05] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        3071,
+        68,
+        3839,
+        500
+      ],
+      "window_rect_screen": [
+        3060,
+        23,
+        3850,
+        511
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 7,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 197360,
+      "hwnd_hex": "0x302F0",
+      "pid": 11064,
+      "title": "[07] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        775,
+        551,
+        1543,
+        983
+      ],
+      "window_rect_screen": [
+        764,
+        506,
+        1554,
+        994
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 8,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 525566,
+      "hwnd_hex": "0x804FE",
+      "pid": 15532,
+      "title": "[08] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        1544,
+        549,
+        2312,
+        981
+      ],
+      "window_rect_screen": [
+        1533,
+        504,
+        2323,
+        992
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 9,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 723108,
+      "hwnd_hex": "0xB08A4",
+      "pid": 8208,
+      "title": "[09] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        2313,
+        550,
+        3081,
+        982
+      ],
+      "window_rect_screen": [
+        2302,
+        505,
+        3092,
+        993
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 11,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 791390,
+      "hwnd_hex": "0xC135E",
+      "pid": 28172,
+      "title": "[11] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        0,
+        1031,
+        768,
+        1463
+      ],
+      "window_rect_screen": [
+        -11,
+        986,
+        779,
+        1474
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 12,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 199532,
+      "hwnd_hex": "0x30B6C",
+      "pid": 8212,
+      "title": "[12] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        772,
+        1033,
+        1540,
+        1465
+      ],
+      "window_rect_screen": [
+        761,
+        988,
+        1551,
+        1476
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 13,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 592852,
+      "hwnd_hex": "0x90BD4",
+      "pid": 16544,
+      "title": "[13] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        1542,
+        1036,
+        2310,
+        1468
+      ],
+      "window_rect_screen": [
+        1531,
+        991,
+        2321,
+        1479
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 14,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 1116670,
+      "hwnd_hex": "0x1109FE",
+      "pid": 29184,
+      "title": "[14] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        2309,
+        1031,
+        3077,
+        1463
+      ],
+      "window_rect_screen": [
+        2298,
+        986,
+        3088,
+        1474
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    },
+    {
+      "slot": 15,
+      "measured_at": "2026-07-06T08:18:43+08:00",
+      "hwnd": 200076,
+      "hwnd_hex": "0x30D8C",
+      "pid": 6668,
+      "title": "[15] 星詠魔力",
+      "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+      "slot_source": "title",
+      "client_size": {
+        "w": 768,
+        "h": 432
+      },
+      "client_rect_screen": [
+        3079,
+        1030,
+        3847,
+        1462
+      ],
+      "window_rect_screen": [
+        3068,
+        985,
+        3858,
+        1473
+      ],
+      "window_size": {
+        "w": 790,
+        "h": 488
+      },
+      "measurement_method": "Win32 GetClientRect + ClientToScreen + GetWindowRect",
+      "coordinate_space": "client pixels"
+    }
+  ]
+}

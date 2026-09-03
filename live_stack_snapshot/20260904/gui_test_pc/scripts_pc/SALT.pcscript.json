@@ -1,0 +1,279 @@
+﻿{
+  "format": "gui_test_pc_script_v1",
+  "version": 1,
+  "created_at": "2026-07-19T20:39:11+08:00",
+  "target": {
+    "hwnd": 787634,
+    "hwnd_hex": "0xC04B2",
+    "pid": 18884,
+    "title": "[07] 「星詠魔力 - 七空藍5」「S1雙子 - 雙子一」「Lv.76 Hp:1464/1464 Mp:464」",
+    "class_name": "UnityWndClass",
+    "process_name": "StarCG.exe",
+    "process_path": "D:\\TWFULLPC1.2.76\\StarCG.exe",
+    "process_id": 18884,
+    "slot": 7,
+    "target_id": "slot:7",
+    "slot_source": "pid_map"
+  },
+  "client_size": {
+    "w": 1920,
+    "h": 1080
+  },
+  "duration_ms": 75731,
+  "recording_policy": {
+    "classification": "strict_click_else_drag",
+    "click_max_duration_ms": 180,
+    "click_max_move_px": 1,
+    "force_drag_hotkey": "F8"
+  },
+  "events": [
+    {
+      "type": "click",
+      "t_ms": 1875,
+      "x": 1316,
+      "y": 1011,
+      "button": "left",
+      "duration_ms": 53
+    },
+    {
+      "type": "click",
+      "t_ms": 3612,
+      "x": 1616,
+      "y": 532,
+      "button": "left",
+      "duration_ms": 85
+    },
+    {
+      "type": "click",
+      "t_ms": 5391,
+      "x": 1483,
+      "y": 470,
+      "button": "left",
+      "duration_ms": 74
+    },
+    {
+      "type": "click",
+      "t_ms": 7132,
+      "x": 826,
+      "y": 653,
+      "button": "left",
+      "duration_ms": 55
+    },
+    {
+      "type": "click",
+      "t_ms": 9503,
+      "x": 1560,
+      "y": 148,
+      "button": "left",
+      "duration_ms": 55
+    },
+    {
+      "type": "click",
+      "t_ms": 12467,
+      "x": 382,
+      "y": 216,
+      "button": "left",
+      "duration_ms": 52
+    },
+    {
+      "type": "click",
+      "t_ms": 15076,
+      "x": 519,
+      "y": 430,
+      "button": "left",
+      "duration_ms": 84
+    },
+    {
+      "type": "click",
+      "t_ms": 16925,
+      "x": 751,
+      "y": 592,
+      "button": "left",
+      "duration_ms": 106
+    },
+    {
+      "type": "click",
+      "t_ms": 19088,
+      "x": 1317,
+      "y": 1017,
+      "button": "left",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 22507,
+      "x": 1611,
+      "y": 537,
+      "button": "left",
+      "duration_ms": 65
+    },
+    {
+      "type": "click",
+      "t_ms": 24395,
+      "x": 74,
+      "y": 167,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 26691,
+      "x": 1477,
+      "y": 639,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 32134,
+      "x": 437,
+      "y": 469,
+      "button": "left",
+      "duration_ms": 22
+    },
+    {
+      "type": "click",
+      "t_ms": 33902,
+      "x": 1474,
+      "y": 887,
+      "button": "left",
+      "duration_ms": 107
+    },
+    {
+      "type": "click",
+      "t_ms": 35712,
+      "x": 82,
+      "y": 348,
+      "button": "left",
+      "duration_ms": 98
+    },
+    {
+      "type": "click",
+      "t_ms": 38091,
+      "x": 1475,
+      "y": 634,
+      "button": "left",
+      "duration_ms": 75
+    },
+    {
+      "type": "click",
+      "t_ms": 40961,
+      "x": 465,
+      "y": 464,
+      "button": "left",
+      "duration_ms": 65
+    },
+    {
+      "type": "click",
+      "t_ms": 44168,
+      "x": 1466,
+      "y": 885,
+      "button": "left",
+      "duration_ms": 76
+    },
+    {
+      "type": "click",
+      "t_ms": 46734,
+      "x": 84,
+      "y": 530,
+      "button": "left",
+      "duration_ms": 86
+    },
+    {
+      "type": "click",
+      "t_ms": 48534,
+      "x": 1473,
+      "y": 640,
+      "button": "left",
+      "duration_ms": 87
+    },
+    {
+      "type": "click",
+      "t_ms": 51282,
+      "x": 462,
+      "y": 473,
+      "button": "left",
+      "duration_ms": 97
+    },
+    {
+      "type": "click",
+      "t_ms": 53594,
+      "x": 1467,
+      "y": 886,
+      "button": "left",
+      "duration_ms": 64
+    },
+    {
+      "type": "click",
+      "t_ms": 55597,
+      "x": 93,
+      "y": 711,
+      "button": "left",
+      "duration_ms": 73
+    },
+    {
+      "type": "click",
+      "t_ms": 58175,
+      "x": 1459,
+      "y": 634,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 60323,
+      "x": 446,
+      "y": 470,
+      "button": "left",
+      "duration_ms": 77
+    },
+    {
+      "type": "click",
+      "t_ms": 62851,
+      "x": 1474,
+      "y": 883,
+      "button": "left",
+      "duration_ms": 96
+    },
+    {
+      "type": "click",
+      "t_ms": 64817,
+      "x": 93,
+      "y": 883,
+      "button": "left",
+      "duration_ms": 95
+    },
+    {
+      "type": "click",
+      "t_ms": 67101,
+      "x": 1478,
+      "y": 632,
+      "button": "left",
+      "duration_ms": 118
+    },
+    {
+      "type": "click",
+      "t_ms": 68957,
+      "x": 459,
+      "y": 470,
+      "button": "left",
+      "duration_ms": 118
+    },
+    {
+      "type": "click",
+      "t_ms": 71851,
+      "x": 1468,
+      "y": 882,
+      "button": "left",
+      "duration_ms": 105
+    },
+    {
+      "type": "click",
+      "t_ms": 74092,
+      "x": 1561,
+      "y": 151,
+      "button": "left",
+      "duration_ms": 85
+    }
+  ]
+}

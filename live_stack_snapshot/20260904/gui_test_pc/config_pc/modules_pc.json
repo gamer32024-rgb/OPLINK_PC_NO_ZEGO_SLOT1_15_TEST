@@ -1,0 +1,77 @@
+﻿{
+  "updated_at": "2026-09-01T15:17:56+08:00",
+  "modules": {
+    "LOGIN": [
+      "LOGIN.pcscript.json"
+    ],
+    "銀行集錢": [
+      "銀行集錢.pcscript.json"
+    ],
+    "入戰": [
+      "入戰.pcscript.json"
+    ],
+    "SALT": [
+      "SALT.pcscript.json",
+      "SALT2.pcscript.json"
+    ],
+    "修水晶": [
+      "修水晶.pcscript.json"
+    ],
+    "MILK": [
+      "牛奶.pcscript.json",
+      "MILK2.pcscript.json"
+    ],
+    "FLOUR": [
+      "FLOUR.pcscript.json"
+    ],
+    "中斷戰鬥": [
+      "中斷戰鬥-Active.battle.json"
+    ],
+    "CD地": [
+      "CD_地攤.pcscript.json"
+    ],
+    "月賣石": [
+      "賣A.pcscript.json",
+      "賣B.pcscript.json"
+    ],
+    "買月卡": [
+      "分石買月卡.pcscript.json"
+    ],
+    "練功全修": [
+      "練功全修.pcscript.json"
+    ],
+    "修裝": [
+      "修裝.....新.pcscript.json"
+    ],
+    "MP": [
+      "MP.pcscript.json"
+    ],
+    "北北": [
+      "北北.pcscript.json"
+    ],
+    "簽": [
+      "簽.pcscript.json"
+    ],
+    "南南": [
+      "南南南.pcscript.json"
+    ],
+    "庫洞": [
+      "庫洞....新.pcscript.json"
+    ],
+    "買卡時": [
+      "卡時.pcscript.json"
+    ],
+    "買斧": [
+      "買斧A.pcscript.json"
+    ],
+    "銀行放斧": [
+      "銀行放斧A.pcscript.json"
+    ],
+    "登出": [
+      "登出.pcscript.json"
+    ],
+    "造帽": [
+      "造帽.pcscript.json"
+    ]
+  }
+}
