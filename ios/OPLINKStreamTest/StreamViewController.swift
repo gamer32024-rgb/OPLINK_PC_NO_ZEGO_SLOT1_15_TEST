@@ -37,6 +37,7 @@ final class StreamViewController: UIViewController {
     private let targetLabel = UILabel()
     private let streamSlotPicker = StreamSlotPickerView(effect: nil)
     private let guiPanel = GUIControlPanelView(frame: .zero)
+    private let assetInventoryPanel = AssetInventoryPanelView(frame: .zero)
     private let legacyControls = LegacyStreamControlsView()
     private let fixedRightRail = FixedRightRailView()
     private let inputToast = UILabel()
@@ -224,6 +225,9 @@ final class StreamViewController: UIViewController {
         guiPanel.translatesAutoresizingMaskIntoConstraints = false
         guiPanel.isHidden = true
         view.addSubview(guiPanel)
+        assetInventoryPanel.translatesAutoresizingMaskIntoConstraints = false
+        assetInventoryPanel.isHidden = true
+        view.addSubview(assetInventoryPanel)
         buildLegacyControls()
         buildKeyboardPanel()
         buildInputToast()
@@ -235,7 +239,11 @@ final class StreamViewController: UIViewController {
             guiPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             guiPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             guiPanel.topAnchor.constraint(equalTo: view.topAnchor),
-            guiPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            guiPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            assetInventoryPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            assetInventoryPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            assetInventoryPanel.topAnchor.constraint(equalTo: view.topAnchor),
+            assetInventoryPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
@@ -690,8 +698,11 @@ final class StreamViewController: UIViewController {
             self?.clampLegacyControls(save: false)
         }
         fixedRightRail.onControlPanel = { [weak self] in self?.showGUIPanel() }
+        fixedRightRail.onAssets = { [weak self] in self?.showAssetInventory() }
         fixedRightRail.onKeyboard = { [weak self] in self?.toggleKeyboardPanel() }
 
+        assetInventoryPanel.onClose = { [weak self] in self?.assetInventoryPanel.isHidden = true }
+        assetInventoryPanel.onRefresh = { [weak self] in self?.refreshAssetInventory() }
         guiPanel.onClose = { [weak self] in self?.guiPanel.isHidden = true }
         guiPanel.onRefresh = { [weak self] in self?.refreshGUIBridgeState() }
         guiPanel.onPlay = { [weak self] slots, modules in self?.sendModuleChain(slots: slots, modules: modules) }
@@ -737,6 +748,7 @@ final class StreamViewController: UIViewController {
     @objc private func showGUIPanel() {
         collapseLegacyControls()
         closeKeyboardPanel()
+        assetInventoryPanel.isHidden = true
         guiPanel.prepareForPresentation(streamSlot: selectedSlot)
         guiPanel.isHidden = false
         view.bringSubviewToFront(guiPanel)
@@ -747,6 +759,7 @@ final class StreamViewController: UIViewController {
         if keyboardPanel.isHidden {
             collapseLegacyControls()
             guiPanel.isHidden = true
+            assetInventoryPanel.isHidden = true
             keyboardPanel.isHidden = false
             view.bringSubviewToFront(keyboardPanel)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
@@ -754,6 +767,35 @@ final class StreamViewController: UIViewController {
             }
         } else {
             closeKeyboardPanel()
+        }
+    }
+
+    private func showAssetInventory() {
+        collapseLegacyControls()
+        closeKeyboardPanel()
+        streamSlotPicker.isHidden = true
+        guiPanel.isHidden = true
+        assetInventoryPanel.prepareForPresentation(streamSlot: selectedSlot)
+        assetInventoryPanel.isHidden = false
+        view.bringSubviewToFront(assetInventoryPanel)
+        refreshAssetInventory()
+    }
+
+    private func refreshAssetInventory() {
+        guard let baseURL = configuredBaseURL() else {
+            assetInventoryPanel.setError("尚未設定 OPLINK 主機。")
+            return
+        }
+        guiAPI.fetchAssetInventory(baseURL: baseURL, slots: OPLINKSlots.all) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, !self.assetInventoryPanel.isHidden else { return }
+                switch result {
+                case .success(let response):
+                    self.assetInventoryPanel.apply(response)
+                case .failure(let error):
+                    self.assetInventoryPanel.setError(error.localizedDescription)
+                }
+            }
         }
     }
 

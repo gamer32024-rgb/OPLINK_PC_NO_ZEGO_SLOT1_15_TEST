@@ -49,6 +49,14 @@ final class GUIBridgeAPI {
         get(GUIBridgeEndpoint.jobs(base: baseURL), completion: completion)
     }
 
+    func fetchAssetInventory(
+        baseURL: URL,
+        slots: [Int],
+        completion: @escaping (Result<GUIAssetInventoryResponse, Error>) -> Void
+    ) {
+        get(GUIBridgeEndpoint.assetsLatest(base: baseURL, slots: slots), completion: completion)
+    }
+
     func playModuleChain(
         baseURL: URL,
         slots: [Int],

@@ -42,6 +42,46 @@ struct GUIModuleChainPresetSaveResponse: Decodable {
     let presets: [GUIModuleChainPreset]
 }
 
+struct GUIAssetInventoryResponse: Decodable {
+    let ok: Bool
+    let databaseReady: Bool
+    let items: [GUIAssetInventoryItem]
+
+    enum CodingKeys: String, CodingKey {
+        case ok, items
+        case databaseReady = "database_ready"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try values.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        databaseReady = try values.decodeIfPresent(Bool.self, forKey: .databaseReady) ?? false
+        items = try values.decodeIfPresent([GUIAssetInventoryItem].self, forKey: .items) ?? []
+    }
+}
+
+struct GUIAssetInventoryItem: Decodable {
+    let slot: Int
+    let characterIndex: Int
+    let coins: Int64?
+    let boundCrystals: Int64?
+    let unboundCrystals: Int64?
+    let weaponEmpty: Bool?
+    let status: String?
+    let capturedAt: String?
+    let scanCapturedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case slot, coins, status
+        case characterIndex = "character_index"
+        case boundCrystals = "bound_crystals"
+        case unboundCrystals = "unbound_crystals"
+        case weaponEmpty = "weapon_empty"
+        case capturedAt = "captured_at"
+        case scanCapturedAt = "scan_captured_at"
+    }
+}
+
 struct GUIJobsResponse: Decodable {
     let jobs: [GUIBridgeJob]
     let gui: GUIHeartbeat?
@@ -367,6 +407,17 @@ enum GUIBridgeEndpoint {
 
     static func jobs(base: URL) -> URL {
         StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/play/jobs")
+    }
+
+    static func assetsLatest(base: URL, slots: [Int]) -> URL {
+        let endpoint = StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/assets/latest")
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            return endpoint
+        }
+        components.queryItems = [
+            URLQueryItem(name: "slots", value: slots.map(String.init).joined(separator: ","))
+        ]
+        return components.url ?? endpoint
     }
 
     static func moduleChain(base: URL) -> URL {

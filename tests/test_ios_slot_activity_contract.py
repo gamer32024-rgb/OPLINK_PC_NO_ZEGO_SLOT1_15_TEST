@@ -29,14 +29,44 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertIn("guard !guiPanel.isHidden", controller)
         self.assertIn("refreshGUIBridgeHeartbeat(baseURL: baseURL)", controller)
 
-    def test_deferred_asset_inventory_is_not_in_formal_build(self) -> None:
-        sources = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (ROOT / "ios/OPLINKStreamTest").glob("*.swift")
+    def test_asset_inventory_is_available_from_the_fixed_right_rail(self) -> None:
+        rail = (ROOT / "ios/OPLINKStreamTest/LegacyStreamControlsView.swift").read_text(
+            encoding="utf-8"
+        )
+        controller = (ROOT / "ios/OPLINKStreamTest/StreamViewController.swift").read_text(
+            encoding="utf-8"
+        )
+        api = (ROOT / "ios/OPLINKStreamTest/GUIBridgeAPI.swift").read_text(encoding="utf-8")
+        models = (ROOT / "ios/OPLINKStreamTest/GUIBridgeModels.swift").read_text(
+            encoding="utf-8"
+        )
+        panel = (ROOT / "ios/OPLINKStreamTest/AssetInventoryPanelView.swift").read_text(
+            encoding="utf-8"
         )
 
-        self.assertNotIn("GUIAssetInventory", sources)
-        self.assertNotIn("onRequestAssets", sources)
+        self.assertIn('iconButton("dollarsign.circle.fill"', rail)
+        self.assertIn("arrangedSubviews: [assets, keyboard, grid]", rail)
+        self.assertIn("fixedRightRail.onAssets", controller)
+        self.assertIn("fetchAssetInventory(baseURL: baseURL, slots: OPLINKSlots.all)", controller)
+        self.assertIn("func fetchAssetInventory", api)
+        self.assertIn("/gui-test-pc/api/assets/latest", models)
+        self.assertIn("struct GUIAssetInventoryItem", models)
+        self.assertIn("for slot in OPLINKSlots.range", panel)
+
+    def test_asset_summary_and_equipment_light_follow_confirmed_rules(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/AssetInventoryPanelView.swift").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("for character in 1...5", panel)
+        self.assertIn("guard let value = readings[character]?[keyPath: keyPath]", panel)
+        self.assertIn("truncateThousands ? (value / 1_000) * 1_000 : value", panel)
+        self.assertIn("Self.amount(item?.coins, truncateThousands: true)", panel)
+        self.assertIn("count == 5", panel)
+        self.assertIn("(2...5).allSatisfy", panel)
+        self.assertIn("readings[$0]?.weaponEmpty == false", panel)
+        self.assertIn('if character == 1 {\n                weapon = "不檢測"', panel)
+        self.assertIn("self.expandedSlot == selectedSlot ? nil : selectedSlot", panel)
 
     def test_launcher_progress_decodes_and_displays_all_action_states(self) -> None:
         models = (ROOT / "ios/OPLINKStreamTest/GUIBridgeModels.swift").read_text(encoding="utf-8")

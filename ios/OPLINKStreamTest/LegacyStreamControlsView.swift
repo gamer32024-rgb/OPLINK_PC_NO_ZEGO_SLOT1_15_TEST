@@ -150,6 +150,7 @@ final class LegacyStreamControlsView: UIVisualEffectView {
 }
 
 final class FixedRightRailView: UIVisualEffectView {
+    var onAssets: (() -> Void)?
     var onKeyboard: (() -> Void)?
     var onControlPanel: (() -> Void)?
 
@@ -169,12 +170,14 @@ final class FixedRightRailView: UIVisualEffectView {
         layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
         layer.masksToBounds = true
 
+        let assets = iconButton("dollarsign.circle.fill", label: "最新角色資產")
         let keyboard = iconButton("keyboard", label: "Keyboard")
         let grid = iconButton("square.grid.2x2.fill", label: "GUI_TEST_PC")
+        assets.addTarget(self, action: #selector(assetsTapped), for: .touchUpInside)
         keyboard.addTarget(self, action: #selector(keyboardTapped), for: .touchUpInside)
         grid.addTarget(self, action: #selector(controlPanelTapped), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [keyboard, grid])
+        let stack = UIStackView(arrangedSubviews: [assets, keyboard, grid])
         stack.axis = .vertical
         stack.spacing = 4
         stack.distribution = .fillEqually
@@ -182,7 +185,7 @@ final class FixedRightRailView: UIVisualEffectView {
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 42),
-            heightAnchor.constraint(equalToConstant: 96),
+            heightAnchor.constraint(equalToConstant: 140),
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
@@ -198,6 +201,10 @@ final class FixedRightRailView: UIVisualEffectView {
         button.layer.cornerRadius = 8
         button.accessibilityLabel = label
         return button
+    }
+
+    @objc private func assetsTapped() {
+        onAssets?()
     }
 
     @objc private func keyboardTapped() {
