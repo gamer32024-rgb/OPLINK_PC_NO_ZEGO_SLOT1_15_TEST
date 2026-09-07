@@ -1,0 +1,24 @@
+PRE-LAUNCH OPTIMIZATION BACKUP
+Created: 2026-09-07 12:59:55 Asia/Taipei
+
+Purpose:
+- Exact rollback point before changing Launch All default scope, launcher pacing,
+  pipelined launcher auto-login, and LOGIN-only cooperative scheduling.
+- The older GitHub backup/live-stack-20260904 branch must remain unchanged.
+
+Restore scope:
+- Copy gui_test_pc.py and gui_test_pc_server.py to GUI_TEST_PC_DEV_20260703.
+- Copy launcher/starcg_15_control_gui_test_pc.ps1 to the launcher folder.
+- Copy static/mobile/index.html and static/mobile/sw.js to static/mobile.
+- Copy config_pc/window_layout.json only as part of the complete compatibility set.
+- Copy shared_python/src/starcg_bot/*.py to the workspace src/starcg_bot folder.
+
+Deployment safety:
+- Stop only GUI_TEST_PC and its PWA server before replacing files.
+- Do not stop StarCG or OPLINK unless explicitly requested.
+- Restore the complete compatibility set together, then restart GUI_TEST_PC and
+  the PWA server and verify ports 5100, 5111, heartbeat freshness, and Pico COM5.
+
+Excluded:
+- Windows-user credentials, account data, logs, runtime data, certificates,
+  capture evidence, and game files.
