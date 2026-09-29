@@ -22,6 +22,7 @@ final class GUIControlPanelView: UIView {
     var onLauncher: ((String, [Int]) -> Void)?
     var onArrange: (([Int]) -> Void)?
     var onRequestPresetSave: ((Int, String, [String]) -> Void)?
+    var onSaveDailyRestart: (([GUIDailyRestartEntry]) -> Void)?
     var onRestartController: (() -> Void)?
 
     private let card = UIView()
@@ -63,6 +64,13 @@ final class GUIControlPanelView: UIView {
     private var moduleChain: [String?] = Array(repeating: nil, count: 10)
     private var presets: [GUIModuleChainPreset] = []
     private var playbackAutomations: [GUIPlaybackAutomation] = []
+    private var dailyRestartEntries = (0..<3).map { _ in GUIDailyRestartEntry(enabled: false, time: "", modules: []) }
+    private var dailyRestartLoaded = false
+    private var dailyRestartTaskInstalled = false
+    private var dailyRestartSwitches: [UISwitch] = []
+    private var dailyRestartPickers: [UIDatePicker] = []
+    private var dailyRestartTimeSet: [Bool] = []
+    private var dailyRestartSelectedModules: [[String?]] = []
     private var activeChainIndex = 0
     private var activePresetIndex: Int?
     private var automationSheetMode: String?
@@ -122,6 +130,13 @@ final class GUIControlPanelView: UIView {
         selectedSlots = [streamSlot]
         autoSelectedSlot = streamSlot
         refreshSlotButtons()
+    }
+
+    func updateDailyRestart(entries: [GUIDailyRestartEntry], taskInstalled: Bool) {
+        guard entries.count == 3 else { return }
+        dailyRestartEntries = entries
+        dailyRestartTaskInstalled = taskInstalled
+        dailyRestartLoaded = true
     }
 
     func apply(
@@ -362,6 +377,8 @@ final class GUIControlPanelView: UIView {
         startSelected.addTarget(self, action: #selector(startSelectedTapped), for: .touchUpInside)
         let closeSelected = compactTextButton("關選", color: UIColor(red: 0.63, green: 0.21, blue: 0.16, alpha: 1))
         closeSelected.addTarget(self, action: #selector(closeSelectedTapped), for: .touchUpInside)
+        let restartSettings = compactTextButton("重啟", color: UIColor(red: 0.69, green: 0.42, blue: 0.08, alpha: 1))
+        restartSettings.addTarget(self, action: #selector(dailyRestartTapped), for: .touchUpInside)
 
         let scheduledSettings = textButton(
             "定時設定",
@@ -392,7 +409,7 @@ final class GUIControlPanelView: UIView {
 
         let stack = UIStackView(arrangedSubviews: [
             slotGrid,
-            compactActionRow([startAll, closeAll, startSelected, closeSelected]),
+            compactActionRow([startAll, closeAll, startSelected, closeSelected, restartSettings]),
             buildPresetGrid(),
             automationRow
         ])
@@ -762,6 +779,91 @@ final class GUIControlPanelView: UIView {
     private func showScheduledSettings() {
         presentAutomationSheet(title: "定時設定：等待中的命令", mode: "scheduled-settings")
         renderScheduledSettings()
+    }
+
+    private func showDailyRestartSettings() {
+        presentAutomationSheet(title: "每日重啟 Slot 1–20", mode: "daily-restart")
+        dailyRestartSwitches = []
+        dailyRestartPickers = []
+        dailyRestartTimeSet = []
+        dailyRestartSelectedModules = []
+        automationSheetContent.addArrangedSubview(sheetText(
+            "只執行已啟用的時間點；不重啟電腦，關機時不補跑。視窗穩定後依序播放所選的 0–3 個單一模組。",
+            color: UIColor.white.withAlphaComponent(0.8), fontSize: 11
+        ))
+        if !dailyRestartTaskInstalled {
+            automationSheetContent.addArrangedSubview(sheetText(
+                "電腦端尚未安裝高權限排程工作；可儲存設定，但未安裝前不會執行。",
+                color: UIColor(red: 1, green: 0.75, blue: 0.3, alpha: 1), fontSize: 11
+            ))
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.timeZone = TimeZone(identifier: "Asia/Taipei")
+        formatter.dateFormat = "HH:mm"
+        for index in 0..<3 {
+            let entry = dailyRestartEntries[index]
+            let enabled = UISwitch()
+            enabled.isOn = entry.enabled
+            enabled.onTintColor = UIColor(red: 0.08, green: 0.62, blue: 0.32, alpha: 1)
+            dailyRestartSwitches.append(enabled)
+
+            let picker = UIDatePicker()
+            picker.datePickerMode = .time
+            picker.preferredDatePickerStyle = .compact
+            picker.locale = Locale(identifier: "zh_Hant_TW")
+            picker.timeZone = TimeZone(identifier: "Asia/Taipei")
+            picker.date = formatter.date(from: entry.time) ?? Date()
+            dailyRestartTimeSet.append(!entry.time.isEmpty)
+            picker.addAction(UIAction { [weak self] _ in
+                guard let self else { return }
+                self.dailyRestartTimeSet[index] = true
+            }, for: .valueChanged)
+            dailyRestartPickers.append(picker)
+            let header = UIStackView(arrangedSubviews: [
+                sheetText("時間點 \(index + 1)", fontSize: 12), enabled, UIView(), picker
+            ])
+            header.axis = .horizontal
+            header.alignment = .center
+            header.spacing = 7
+            automationSheetContent.addArrangedSubview(divider())
+            automationSheetContent.addArrangedSubview(header)
+
+            var selected: [String?] = Array(entry.modules.prefix(3)).map { Optional($0) }
+            while selected.count < 3 { selected.append(nil) }
+            dailyRestartSelectedModules.append(selected)
+            for step in 0..<3 {
+                let button = textButton(
+                    selected[step] ?? "不播放", color: UIColor(red: 0.13, green: 0.38, blue: 0.54, alpha: 1),
+                    height: 29, fontSize: 11
+                )
+                button.contentHorizontalAlignment = .left
+                button.widthAnchor.constraint(greaterThanOrEqualToConstant: 145).isActive = true
+                var actions: [UIAction] = []
+                for name in ["不播放"] + moduleNames {
+                    actions.append(UIAction(title: name) { [weak self, weak button] _ in
+                        guard let self else { return }
+                        let value: String? = name == "不播放" ? nil : name
+                        self.dailyRestartSelectedModules[index][step] = value
+                        button?.setTitle(name, for: .normal)
+                    })
+                }
+                button.menu = UIMenu(children: actions)
+                button.showsMenuAsPrimaryAction = true
+                let row = UIStackView(arrangedSubviews: [
+                    sheetText("\(step + 1).", fontSize: 11), button, UIView()
+                ])
+                row.axis = .horizontal
+                row.alignment = .center
+                row.spacing = 7
+                automationSheetContent.addArrangedSubview(row)
+            }
+        }
+        automationSheetActions.addArrangedSubview(UIView())
+        addSheetAction(
+            "儲存重啟時間", color: UIColor(red: 0.08, green: 0.55, blue: 0.35, alpha: 1),
+            selector: #selector(saveDailyRestartTapped)
+        )
     }
 
     private func renderScheduledSettings() {
@@ -1186,7 +1288,7 @@ final class GUIControlPanelView: UIView {
             button.layer.borderWidth = activePresetIndex == index ? 2 : 1
             button.accessibilityHint = preset.modules.isEmpty
                 ? "空白預設，點擊設定"
-                : "點擊載入連串；長按編輯預設。\(preset.modules.joined(separator: "，"))"
+                : "\(index <= 10 ? "點擊立即播放" : "點擊只載入，不播放")；長按編輯預設。\(preset.modules.joined(separator: "，"))"
         }
     }
 
@@ -1467,6 +1569,10 @@ final class GUIControlPanelView: UIView {
         mapPresetToEditableCells(values)
         moduleChooser.isHidden = true
         refreshChainButtons()
+        if index > 10 {
+            setStatus("已將 \(preset.name) 載入目前連串；微調後按「播放」執行。", good: true)
+            return
+        }
         guard let slots = requireSelectedSlots() else {
             setStatus("已載入 \(preset.name) 到第 2–9 格；選擇 Slot 後再按預設即可播放。", good: false)
             return
@@ -1618,6 +1724,42 @@ final class GUIControlPanelView: UIView {
     }
 
     @objc private func scheduledSettingsTapped() { showScheduledSettings() }
+    @objc private func dailyRestartTapped() {
+        guard dailyRestartLoaded else {
+            setStatus("每日重啟設定尚未載入；請確認 GUI_TEST_PC 連線後重試。", good: false)
+            onRefresh?()
+            return
+        }
+        showDailyRestartSettings()
+    }
+
+    @objc private func saveDailyRestartTapped() {
+        guard dailyRestartSwitches.count == 3, dailyRestartPickers.count == 3 else { return }
+        guard (0..<3).allSatisfy({ !dailyRestartSwitches[$0].isOn || dailyRestartTimeSet[$0] }) else {
+            setAutomationSheetError("啟用時間點前，請先選擇該列的時間")
+            return
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.timeZone = TimeZone(identifier: "Asia/Taipei")
+        formatter.dateFormat = "HH:mm"
+        let entries = (0..<3).map { index in
+            let enabled = dailyRestartSwitches[index].isOn
+            return GUIDailyRestartEntry(
+                enabled: enabled,
+                time: enabled ? formatter.string(from: dailyRestartPickers[index].date) : "",
+                modules: dailyRestartSelectedModules[index].compactMap { $0 }
+            )
+        }
+        let times = entries.filter(\.enabled).map(\.time)
+        guard Set(times).count == times.count else {
+            setAutomationSheetError("已啟用的重啟時間不能重複")
+            return
+        }
+        dailyRestartEntries = entries
+        closeAutomationSheetTapped()
+        onSaveDailyRestart?(entries)
+    }
     @objc private func automationLogTapped() { showAutomationLog() }
 
     @objc private func closeAutomationSheetTapped() {

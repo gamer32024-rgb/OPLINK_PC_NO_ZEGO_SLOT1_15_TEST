@@ -92,14 +92,35 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertIn("buttonHeight: ModulePanelMetrics.quickButtonHeight", panel)
         self.assertIn("fontSize: ModulePanelMetrics.quickFontSize", panel)
 
-    def test_preset_maps_to_cells_two_through_nine_and_plays_immediately(self) -> None:
+    def test_preset_1_to_10_plays_and_11_to_20_only_loads(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
         self.assertIn("private func mapPresetToEditableCells", panel)
         self.assertIn("moduleChain[offset + 1] = name", panel)
         self.assertIn("let values = Array(preset.modules.prefix(8))", panel)
-        self.assertIn("beginPlaybackSubmission(slots: slots, feedbackButton: sender)", panel)
-        self.assertIn("onPlay?(slots, values)", panel)
+        tapped = panel.split("@objc private func presetTapped(_ sender: UIButton) {", 1)[1].split(
+            "@objc private func presetLongPressed", 1
+        )[0]
+        self.assertLess(tapped.index("if index > 10 {"), tapped.index("onPlay?(slots, values)"))
+        self.assertIn("mapPresetToEditableCells(values)", tapped)
+        self.assertIn("beginPlaybackSubmission(slots: slots, feedbackButton: sender)", tapped)
+
+    def test_daily_restart_is_one_button_after_existing_controls(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        api = (ROOT / "ios/OPLINKStreamTest/GUIBridgeAPI.swift").read_text(encoding="utf-8")
+        models = (ROOT / "ios/OPLINKStreamTest/GUIBridgeModels.swift").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "compactActionRow([startAll, closeAll, startSelected, closeSelected, restartSettings])",
+            panel,
+        )
+        self.assertIn('compactTextButton("重啟"', panel)
+        self.assertIn("onSaveDailyRestart?(entries)", panel)
+        self.assertIn("for index in 0..<3", panel)
+        self.assertIn("for step in 0..<3", panel)
+        self.assertIn("fetchDailySlotRestart", api)
+        self.assertIn("saveDailySlotRestart", api)
+        self.assertIn('/gui-test-pc/api/daily-slot-restart', models)
 
     def test_busy_playback_slot_tap_cancels_and_long_press_selects_for_replacement(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")

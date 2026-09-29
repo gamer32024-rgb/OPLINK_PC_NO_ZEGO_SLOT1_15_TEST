@@ -725,6 +725,9 @@ final class StreamViewController: UIViewController {
         guiPanel.onRequestPresetSave = { [weak self] index, currentName, modules in
             self?.promptPresetName(index: index, currentName: currentName, modules: modules)
         }
+        guiPanel.onSaveDailyRestart = { [weak self] entries in
+            self?.saveDailySlotRestart(entries: entries)
+        }
         guiPanel.onRestartController = { [weak self] in self?.sendRestartController() }
     }
 
@@ -1638,6 +1641,18 @@ final class StreamViewController: UIViewController {
     private func refreshGUIBridgeState() {
         guard let baseURL = configuredBaseURL() else { return }
 
+        guiAPI.fetchDailySlotRestart(baseURL: baseURL) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.guiPanel.updateDailyRestart(entries: response.entries, taskInstalled: response.taskInstalled)
+                case .failure(let error):
+                    if !self.guiPanel.isHidden { self.guiPanel.setStatus(error.localizedDescription, good: false) }
+                }
+            }
+        }
+
         guiAPI.fetchTargets(baseURL: baseURL) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -1692,6 +1707,27 @@ final class StreamViewController: UIViewController {
         }
 
         refreshGUIBridgeHeartbeat(baseURL: baseURL)
+    }
+
+    private func saveDailySlotRestart(entries: [GUIDailyRestartEntry]) {
+        guard let baseURL = configuredBaseURL() else { return }
+        guiAPI.saveDailySlotRestart(baseURL: baseURL, entries: entries) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let response):
+                    self.guiPanel.updateDailyRestart(entries: response.entries, taskInstalled: response.taskInstalled)
+                    self.guiPanel.setStatus(
+                        response.taskInstalled
+                            ? "每日 Slot 重啟時間已儲存。"
+                            : "時間已儲存，但電腦端排程工作尚未安裝，不會自動執行。",
+                        good: response.taskInstalled
+                    )
+                case .failure(let error):
+                    self.guiPanel.setStatus("儲存每日重啟時間失敗：\(error.localizedDescription)", good: false)
+                }
+            }
+        }
     }
 
     private func refreshGUIBridgeHeartbeat(baseURL: URL) {

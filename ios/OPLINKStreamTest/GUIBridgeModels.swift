@@ -42,6 +42,27 @@ struct GUIModuleChainPresetSaveResponse: Decodable {
     let presets: [GUIModuleChainPreset]
 }
 
+struct GUIDailyRestartEntry: Codable {
+    var enabled: Bool
+    var time: String
+    var modules: [String]
+}
+
+struct GUIDailyRestartResponse: Decodable {
+    let ok: Bool
+    let entries: [GUIDailyRestartEntry]
+    let taskInstalled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok, entries
+        case taskInstalled = "task_installed"
+    }
+}
+
+struct GUIDailyRestartRequest: Encodable {
+    let entries: [GUIDailyRestartEntry]
+}
+
 struct GUIAssetInventoryResponse: Decodable {
     let ok: Bool
     let databaseReady: Bool
@@ -403,6 +424,10 @@ enum GUIBridgeEndpoint {
 
     static func moduleChainPreset(base: URL, index: Int) -> URL {
         StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/module-chain-presets/\(index)")
+    }
+
+    static func dailySlotRestart(base: URL) -> URL {
+        StreamEndpoint.replacingPath(base, with: "/gui-test-pc/api/daily-slot-restart")
     }
 
     static func jobs(base: URL) -> URL {

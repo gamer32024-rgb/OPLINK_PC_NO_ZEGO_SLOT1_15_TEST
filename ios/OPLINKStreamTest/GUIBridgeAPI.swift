@@ -45,6 +45,25 @@ final class GUIBridgeAPI {
         )
     }
 
+    func fetchDailySlotRestart(
+        baseURL: URL,
+        completion: @escaping (Result<GUIDailyRestartResponse, Error>) -> Void
+    ) {
+        get(GUIBridgeEndpoint.dailySlotRestart(base: baseURL), completion: completion)
+    }
+
+    func saveDailySlotRestart(
+        baseURL: URL,
+        entries: [GUIDailyRestartEntry],
+        completion: @escaping (Result<GUIDailyRestartResponse, Error>) -> Void
+    ) {
+        post(
+            GUIBridgeEndpoint.dailySlotRestart(base: baseURL),
+            body: GUIDailyRestartRequest(entries: entries),
+            completion: completion
+        )
+    }
+
     func fetchJobs(baseURL: URL, completion: @escaping (Result<GUIJobsResponse, Error>) -> Void) {
         get(GUIBridgeEndpoint.jobs(base: baseURL), completion: completion)
     }
