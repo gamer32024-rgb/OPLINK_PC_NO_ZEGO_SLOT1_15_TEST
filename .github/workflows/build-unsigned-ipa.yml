@@ -20,6 +20,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Test Tailscale candidate filtering
+        run: |
+          swiftc ios/OPLINKStreamTest/TailnetCandidateFilter.swift ios/tests/tailnet-filter/main.swift -o "$RUNNER_TEMP/tailnet-filter-test"
+          "$RUNNER_TEMP/tailnet-filter-test"
+
       - name: Audit public repository
         run: python3 scripts/audit_public_repo.py
 

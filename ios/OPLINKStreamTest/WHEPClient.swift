@@ -30,6 +30,8 @@ final class WHEPClient: NSObject {
     var onStateChanged: ((String) -> Void)?
     var onError: ((Error) -> Void)?
     var onReady: ((Int) -> Void)?
+    var preferTailnetCandidates = false
+    private(set) var didFilterCandidates = false
 
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -69,6 +71,7 @@ final class WHEPClient: NSObject {
 
     func connect(endpoint: URL, renderer: RTCVideoRenderer? = nil) {
         stop()
+        didFilterCandidates = false
         connectionGeneration += 1
         let generation = connectionGeneration
         frameProbe = FirstFrameProbe()
@@ -180,8 +183,15 @@ final class WHEPClient: NSObject {
             fail(WHEPError.missingOffer)
             return
         }
-        guard let offerSDP = Self.normalizedOfferSDP(localDescription.sdp),
-              let offerData = offerSDP.data(using: .utf8) else {
+        guard let normalizedSDP = Self.normalizedOfferSDP(localDescription.sdp) else {
+            fail(WHEPError.invalidOffer)
+            return
+        }
+        let filtered = preferTailnetCandidates
+            ? TailnetCandidateFilter.filter(normalizedSDP)
+            : (sdp: normalizedSDP, changed: false)
+        didFilterCandidates = filtered.changed
+        guard let offerData = filtered.sdp.data(using: .utf8) else {
             fail(WHEPError.invalidOffer)
             return
         }

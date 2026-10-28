@@ -50,6 +50,7 @@ final class StreamViewController: UIViewController {
     private lazy var frameMonitor = VideoFrameMonitor(target: videoView)
     private var whepClients: [Int: WHEPClient] = [:]
     private var singleWHEPClient: WHEPClient?
+    private var nativeUseFullCandidatesForRetry = false
     private var activeWHEPSlot: Int?
     private var pendingWHEPSlot: Int?
     private var pendingRenderedSlot: Int?
@@ -644,6 +645,7 @@ final class StreamViewController: UIViewController {
             self.automaticReconnectTask?.cancel()
             self.automaticReconnectTask = nil
             self.automaticReconnectAttempt = 0
+            self.nativeUseFullCandidatesForRetry = false
             self.legacyControls.setCurrentSlot(renderedSlot)
             self.renderedSize = size
             if let switchStartedAt = self.switchStartedAt {
@@ -1215,9 +1217,11 @@ final class StreamViewController: UIViewController {
         }
     }
 
-    private func nativeWHEPClient() -> WHEPClient {
+    private func nativeWHEPClient(baseURL: URL) -> WHEPClient {
         if let singleWHEPClient { return singleWHEPClient }
         let client = WHEPClient()
+        client.preferTailnetCandidates = !nativeUseFullCandidatesForRetry
+            && TailnetCandidateFilter.isTailnetHost(baseURL.host)
         client.onReady = { [weak self, weak client] elapsedMs in
             guard let self, let client,
                   self.streamMode == .nativeSingle,
@@ -1234,6 +1238,7 @@ final class StreamViewController: UIViewController {
         client.onError = { [weak self, weak client] error in
             guard let self, let client,
                   self.singleWHEPClient === client else { return }
+            if client.didFilterCandidates { self.nativeUseFullCandidatesForRetry = true }
             self.singleWHEPClient = nil
             client.stop()
             if self.streamMode == .nativeSingle {
@@ -1260,7 +1265,7 @@ final class StreamViewController: UIViewController {
         desiredWarmSlots.removeAll()
         prewarmSequence += 1
 
-        let client = nativeWHEPClient()
+        let client = nativeWHEPClient(baseURL: baseURL)
         if client.isReady {
             lastWHEPConnectMilliseconds = 0
             client.setRenderer(frameMonitor)
@@ -1317,6 +1322,7 @@ final class StreamViewController: UIViewController {
                   self.singleWHEPClient === client else { return }
             self.nativeFirstFrameTimeoutTask = nil
             self.singleWHEPClient = nil
+            if client.didFilterCandidates { self.nativeUseFullCandidatesForRetry = true }
             client.stop()
             _ = self.frameMonitor.reset()
             self.pendingNativeRenderedSlot = nil
@@ -1335,7 +1341,7 @@ final class StreamViewController: UIViewController {
             self.pendingNativeRenderedSlot = slot
             self.pendingNativeSwitchGeneration = switchGeneration
             self.setStatus("舊 WHEP 沒有新首幀，正在建立新連線", good: false)
-            let replacement = self.nativeWHEPClient()
+            let replacement = self.nativeWHEPClient(baseURL: baseURL)
             replacement.connect(
                 endpoint: StreamEndpoint.nativeWhep(base: baseURL),
                 renderer: self.frameMonitor
