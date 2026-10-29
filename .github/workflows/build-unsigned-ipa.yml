@@ -22,7 +22,7 @@ jobs:
 
       - name: Test Tailscale candidate filtering
         run: |
-          swiftc ios/OPLINKStreamTest/TailnetCandidateFilter.swift ios/tests/tailnet-filter/main.swift -o "$RUNNER_TEMP/tailnet-filter-test"
+          swiftc ios/OPLINKStreamTest/TailnetCandidateFilter.swift ios/OPLINKStreamTest/PreparedOfferGate.swift ios/tests/tailnet-filter/main.swift -o "$RUNNER_TEMP/tailnet-filter-test"
           "$RUNNER_TEMP/tailnet-filter-test"
 
       - name: Audit public repository

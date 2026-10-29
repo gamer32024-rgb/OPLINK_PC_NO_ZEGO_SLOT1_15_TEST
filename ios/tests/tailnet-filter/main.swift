@@ -31,4 +31,13 @@ require(!unchanged.changed && unchanged.sdp == noTailnet, "offers without Tailsc
 require(TailnetCandidateFilter.isTailnetHost("pc.example.ts.net"), "MagicDNS host must be eligible")
 require(TailnetCandidateFilter.isTailnetHost("100.100.20.30"), "Tailscale IPv4 host must be eligible")
 require(!TailnetCandidateFilter.isTailnetHost("example.com"), "unrelated host must not be filtered")
+let endpoint = URL(string: "https://example.ts.net/oplink-whep/oplink_active/whep")!
+var iceFirst = PreparedOfferGate()
+require(iceFirst.markReady() == nil, "preparation must not post before activation")
+require(iceFirst.request(endpoint) == endpoint, "activation should post a prepared offer")
+require(iceFirst.markReady() == nil && iceFirst.request(endpoint) == nil, "prepared offer must post once")
+var activationFirst = PreparedOfferGate()
+require(activationFirst.request(endpoint) == nil, "activation must wait for ICE")
+require(activationFirst.markReady() == endpoint, "ICE completion should post the pending offer")
+require(activationFirst.markReady() == nil, "ICE callback must not post twice")
 print("Tailnet candidate filter tests passed")

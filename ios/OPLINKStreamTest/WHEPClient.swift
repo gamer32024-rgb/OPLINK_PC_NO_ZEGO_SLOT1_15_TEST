@@ -48,6 +48,7 @@ final class WHEPClient: NSObject {
     private var sessionURL: URL?
     private var offerTask: URLSessionDataTask?
     private var iceReady: (() -> Void)?
+    private var offerGate = PreparedOfferGate()
     private var connectionGeneration = 0
     private let readyLock = NSLock()
     private var ready = false
@@ -63,6 +64,7 @@ final class WHEPClient: NSObject {
     }
 
     var isStarted: Bool { peerConnection != nil }
+    var isPreparedForConnect: Bool { peerConnection != nil && !offerGate.requested }
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -70,8 +72,28 @@ final class WHEPClient: NSObject {
     }
 
     func connect(endpoint: URL, renderer: RTCVideoRenderer? = nil) {
+        if !isPreparedForConnect {
+            stop()
+            beginPreparation()
+        }
+        guard let peer = peerConnection else { return }
+        self.renderer = renderer
+        connectionStartedAt = Date()
+        let generation = connectionGeneration
+        if let readyEndpoint = offerGate.request(endpoint) {
+            postOffer(peer: peer, endpoint: readyEndpoint, generation: generation)
+        }
+    }
+
+    func prepareForConnection() {
+        guard !isStarted else { return }
         stop()
+        beginPreparation()
+    }
+
+    private func beginPreparation() {
         didFilterCandidates = false
+        offerGate = PreparedOfferGate()
         connectionGeneration += 1
         let generation = connectionGeneration
         frameProbe = FirstFrameProbe()
@@ -83,9 +105,8 @@ final class WHEPClient: NSObject {
         iceConnected = false
         readyNotificationSent = false
         readyLock.unlock()
-        connectionStartedAt = Date()
+        connectionStartedAt = nil
         frameProbe.reset()
-        self.renderer = renderer
         emitState("建立 WebRTC offer")
 
         let configuration = RTCConfiguration()
@@ -113,7 +134,10 @@ final class WHEPClient: NSObject {
                 guard let self, generation == self.connectionGeneration else { return }
                 if let error { self.fail(error); return }
                 self.waitForICE(peer: peer, generation: generation) { [weak self] in
-                    self?.postOffer(peer: peer, endpoint: endpoint, generation: generation)
+                    guard let self, generation == self.connectionGeneration else { return }
+                    if let readyEndpoint = self.offerGate.markReady() {
+                        self.postOffer(peer: peer, endpoint: readyEndpoint, generation: generation)
+                    }
                 }
             }
         }
@@ -122,6 +146,7 @@ final class WHEPClient: NSObject {
     func stop() {
         connectionGeneration += 1
         iceReady = nil
+        offerGate = PreparedOfferGate()
         offerTask?.cancel()
         offerTask = nil
         if let remoteTrack {

@@ -1177,6 +1177,7 @@ final class StreamViewController: UIViewController {
         sequence: Int
     ) {
         setStatus("切換原生單串流至 Slot \(slot)", good: false)
+        nativeWHEPClient(baseURL: baseURL).prepareForConnection()
         streamAPI.activate(baseURL: baseURL, slot: slot) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self,
@@ -1238,10 +1239,11 @@ final class StreamViewController: UIViewController {
         client.onError = { [weak self, weak client] error in
             guard let self, let client,
                   self.singleWHEPClient === client else { return }
+            let wasPreparing = client.isPreparedForConnect
             if client.didFilterCandidates { self.nativeUseFullCandidatesForRetry = true }
             self.singleWHEPClient = nil
             client.stop()
-            if self.streamMode == .nativeSingle {
+            if self.streamMode == .nativeSingle && !wasPreparing {
                 self.setStatus(error.localizedDescription, good: false)
                 self.scheduleAutomaticReconnect(slot: self.selectedSlot, reason: error.localizedDescription)
             }
@@ -1277,7 +1279,7 @@ final class StreamViewController: UIViewController {
                 timeout: 1.0,
                 replaceStaleClient: true
             )
-        } else if !client.isStarted {
+        } else if !client.isStarted || client.isPreparedForConnect {
             client.connect(
                 endpoint: StreamEndpoint.nativeWhep(base: baseURL),
                 renderer: frameMonitor
