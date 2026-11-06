@@ -51,7 +51,16 @@ final class StreamSlotPickerView: UIVisualEffectView {
             stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -20)
         ])
 
+        var row: UIStackView?
         for slot in OPLINKSlots.range {
+            if (slot - 1) % 5 == 0 {
+                let newRow = UIStackView()
+                newRow.axis = .horizontal
+                newRow.spacing = 6
+                newRow.distribution = .fillEqually
+                stack.addArrangedSubview(newRow)
+                row = newRow
+            }
             let button = UIButton(type: .system)
             button.tag = slot
             button.setTitle(String(format: "%02d", slot), for: .normal)
@@ -63,7 +72,7 @@ final class StreamSlotPickerView: UIVisualEffectView {
             button.addTarget(self, action: #selector(slotTapped(_:)), for: .touchUpInside)
             button.heightAnchor.constraint(equalToConstant: 34).isActive = true
             buttons.append(button)
-            stack.addArrangedSubview(button)
+            row?.addArrangedSubview(button)
         }
         refreshButtons()
     }
@@ -90,3 +99,4 @@ final class StreamSlotPickerView: UIVisualEffectView {
         onSelectSlot?(sender.tag)
     }
 }
+

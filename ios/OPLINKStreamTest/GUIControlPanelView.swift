@@ -28,12 +28,15 @@ final class GUIControlPanelView: UIView {
     private let card = UIView()
     private let statusLabel = UILabel()
     private let slotButtons = OPLINKSlots.range.map { _ in UIButton(type: .system) }
+    private let slotGroupButtons = (0..<4).map { _ in UIButton(type: .system) }
     private let chainButtons = (0..<10).map { _ in UIButton(type: .system) }
     private let presetButtons = (0..<20).map { _ in UIButton(type: .system) }
     private let moduleChooser = UIView()
     private let moduleChooserTitle = UILabel()
     private let moduleGroupsStack = UIStackView()
     private let quickModuleGroupsStack = UIStackView()
+    private var quickGroupStacks: [String: UIStackView] = [:]
+    private var layoutRegions: [(view: UIView, rect: CGRect)] = []
     private let chooserStepButtons = (0..<10).map { _ in UIButton(type: .system) }
     private let savePresetButton = UIButton(type: .system)
     private let automationSheet = UIView()
@@ -80,6 +83,7 @@ final class GUIControlPanelView: UIView {
     private var pendingSubmissionExpiry: [Int: Date] = [:]
     private var autoSelectedSlot: Int?
     private var heartbeatFresh = false
+    private var restartControllerInFlight = false
 
     private enum ChainInsertionMode: Equatable {
         case head
@@ -185,7 +189,9 @@ final class GUIControlPanelView: UIView {
             pendingSubmissionSlots.remove(slot)
             pendingSubmissionExpiry.removeValue(forKey: slot)
         }
-        restartControllerButton.isHidden = heartbeatFresh
+        restartControllerButton.isHidden = false
+        restartControllerButton.isEnabled = !heartbeatFresh && !restartControllerInFlight
+        restartControllerButton.alpha = restartControllerButton.isEnabled ? 1 : 0.35
         if heartbeatFresh,
            statusLabel.text?.contains("GUI_TEST_PC 控制器沒有回應") == true {
             setStatus("GUI_TEST_PC 控制器已恢復連線。", good: true)
@@ -283,38 +289,44 @@ final class GUIControlPanelView: UIView {
         let close = iconButton("xmark", label: "關閉控制面板", size: 32, symbolPointSize: 14)
         close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
 
-        let slotsColumn = buildSlotsColumn()
-        let modulesColumn = buildModulesColumn(closeButton: close)
-        let body = UIStackView(arrangedSubviews: [slotsColumn, modulesColumn])
-        body.axis = .horizontal
-        body.spacing = 10
-        body.distribution = .fill
-        slotsColumn.widthAnchor.constraint(equalTo: body.widthAnchor, multiplier: 0.35).isActive = true
+        let slotsColumn = buildSlotsColumn() as! UIStackView
+        let slotParts = slotsColumn.arrangedSubviews
+        for part in slotParts { slotsColumn.removeArrangedSubview(part); part.removeFromSuperview() }
+        let modulesColumn = buildModulesColumn(closeButton: close) as! UIStackView
+        let moduleContent = modulesColumn.arrangedSubviews[0] as! UIStackView
+        let actionRail = modulesColumn.arrangedSubviews[1]
+        let chainRow = moduleContent.arrangedSubviews[1]
+        moduleContent.removeArrangedSubview(chainRow)
+        chainRow.removeFromSuperview()
+        modulesColumn.removeArrangedSubview(actionRail)
+        actionRail.removeFromSuperview()
 
         statusLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         statusLabel.numberOfLines = 2
         statusLabel.text = "選擇 Slot 與模組後播放"
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.82)
-        restartControllerButton.setTitle("重啟控制器", for: .normal)
+        restartControllerButton.setTitle("控", for: .normal)
+        restartControllerButton.accessibilityLabel = "重啟 GUI_TEST_PC 控制器"
         restartControllerButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
         restartControllerButton.setTitleColor(.white, for: .normal)
         restartControllerButton.backgroundColor = UIColor(red: 0.78, green: 0.18, blue: 0.16, alpha: 1)
         restartControllerButton.layer.cornerRadius = 7
-        restartControllerButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
-        restartControllerButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
-        restartControllerButton.setContentCompressionResistancePriority(.required, for: .vertical)
-        restartControllerButton.isHidden = true
+        restartControllerButton.isEnabled = false
+        restartControllerButton.alpha = 0.35
         restartControllerButton.addTarget(self, action: #selector(restartControllerTapped), for: .touchUpInside)
-        let statusRow = UIStackView(arrangedSubviews: [statusLabel, restartControllerButton])
-        statusRow.axis = .horizontal
-        statusRow.spacing = 8
-        statusRow.alignment = .center
-        statusRow.setContentCompressionResistancePriority(.required, for: .vertical)
-        let mainStack = UIStackView(arrangedSubviews: [statusRow, body])
-        mainStack.axis = .vertical
-        mainStack.spacing = 6
-        mainStack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(mainStack)
+
+        installRegion(slotParts[0], x: 768, y: 0, width: 421, height: 255)
+        installRegion(slotParts[1], x: 0, y: 0, width: 442, height: 60)
+        installRegion(slotParts[2], x: 585, y: 299, width: 499, height: 219)
+        installRegion(slotParts[3], x: 88, y: 564, width: 420, height: 66)
+        installRegion(restartControllerButton, x: 4, y: 574, width: 55, height: 55)
+        installRegion(makeQuickGroupRegion("戰鬥準備"), x: 123, y: 62, width: 326, height: 182)
+        installRegion(makeQuickGroupRegion("生產"), x: 124, y: 245, width: 324, height: 188)
+        installRegion(makeQuickGroupRegion("出發"), x: 124, y: 436, width: 329, height: 128)
+        installRegion(makeQuickGroupRegion("其他"), x: 445, y: 3, width: 320, height: 250)
+        installRegion(chainRow, x: 520, y: 524, width: 574, height: 105)
+        installRegion(actionRail, x: 0, y: 59, width: 121, height: 422)
+        installRegion(statusLabel, x: 1095, y: 540, width: 180, height: 85)
 
         let preferredHeight = card.heightAnchor.constraint(equalToConstant: 420)
         preferredHeight.priority = .defaultHigh
@@ -323,11 +335,7 @@ final class GUIControlPanelView: UIView {
             card.centerYAnchor.constraint(equalTo: safeAreaLayoutGuide.centerYAnchor),
             card.widthAnchor.constraint(equalTo: safeAreaLayoutGuide.widthAnchor, multiplier: 0.97),
             preferredHeight,
-            card.heightAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.heightAnchor, multiplier: 0.95),
-            mainStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
-            mainStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
-            mainStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
-            mainStack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
+            card.heightAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.heightAnchor, multiplier: 0.95)
         ])
 
         buildModuleChooser()
@@ -335,6 +343,42 @@ final class GUIControlPanelView: UIView {
         refreshSlotButtons()
         refreshChainButtons()
         refreshPresetButtons()
+    }
+
+    private func installRegion(_ view: UIView, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+        view.translatesAutoresizingMaskIntoConstraints = true
+        card.addSubview(view)
+        layoutRegions.append((view, CGRect(x: x, y: y, width: width, height: height)))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let scaleX = card.bounds.width / 1280
+        let scaleY = card.bounds.height / 630
+        for region in layoutRegions {
+            let rect = region.rect
+            region.view.frame = CGRect(x: rect.minX * scaleX, y: rect.minY * scaleY,
+                                       width: rect.width * scaleX, height: rect.height * scaleY)
+        }
+    }
+
+    private func makeQuickGroupRegion(_ key: String) -> UIView {
+        let scroll = UIScrollView()
+        scroll.showsVerticalScrollIndicator = true
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 7
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
+        ])
+        quickGroupStacks[key] = stack
+        return scroll
     }
 
     private func buildSlotsColumn() -> UIView {
@@ -363,9 +407,21 @@ final class GUIControlPanelView: UIView {
                 let longPress = UILongPressGestureRecognizer(target: self, action: #selector(slotLongPressed(_:)))
                 longPress.minimumPressDuration = 0.45
                 button.addGestureRecognizer(longPress)
-                button.heightAnchor.constraint(equalToConstant: 31).isActive = true
+                let preferredHeight = button.heightAnchor.constraint(equalToConstant: 31)
+                preferredHeight.priority = .defaultHigh
+                preferredHeight.isActive = true
                 row.addArrangedSubview(button)
             }
+            let groupButton = slotGroupButtons[rowIndex]
+            groupButton.tag = rowIndex
+            groupButton.setTitle("\(rowIndex * 5 + 1)–\(rowIndex * 5 + 5)", for: .normal)
+            groupButton.titleLabel?.font = .systemFont(ofSize: 9, weight: .bold)
+            groupButton.titleLabel?.adjustsFontSizeToFitWidth = true
+            groupButton.layer.cornerRadius = 8
+            groupButton.backgroundColor = UIColor(red: 0.16, green: 0.35, blue: 0.48, alpha: 1)
+            groupButton.setTitleColor(.white, for: .normal)
+            groupButton.addTarget(self, action: #selector(slotGroupTapped(_:)), for: .touchUpInside)
+            row.addArrangedSubview(groupButton)
             slotGrid.addArrangedSubview(row)
         }
 
@@ -452,7 +508,7 @@ final class GUIControlPanelView: UIView {
         chainRow.spacing = 0
         chainGrid.widthAnchor.constraint(
             equalTo: chainRow.widthAnchor,
-            multiplier: ModulePanelMetrics.compactScale
+            multiplier: 1
         ).isActive = true
 
         let moduleContent = UIStackView(arrangedSubviews: [modulesScroll, chainRow])
@@ -495,9 +551,9 @@ final class GUIControlPanelView: UIView {
                 button.titleLabel?.adjustsFontSizeToFitWidth = true
                 button.titleLabel?.minimumScaleFactor = 0.68
                 button.addTarget(self, action: #selector(chainTapped(_:)), for: .touchUpInside)
-                button.heightAnchor.constraint(
-                    equalToConstant: ModulePanelMetrics.chainButtonHeight
-                ).isActive = true
+                let preferredHeight = button.heightAnchor.constraint(equalToConstant: ModulePanelMetrics.chainButtonHeight)
+                preferredHeight.priority = .defaultHigh
+                preferredHeight.isActive = true
                 row.addArrangedSubview(button)
             }
             grid.addArrangedSubview(row)
@@ -528,7 +584,9 @@ final class GUIControlPanelView: UIView {
                 let longPress = UILongPressGestureRecognizer(target: self, action: #selector(presetLongPressed(_:)))
                 longPress.minimumPressDuration = 0.45
                 button.addGestureRecognizer(longPress)
-                button.heightAnchor.constraint(equalToConstant: 25).isActive = true
+                let preferredHeight = button.heightAnchor.constraint(equalToConstant: 25)
+                preferredHeight.priority = .defaultHigh
+                preferredHeight.isActive = true
                 row.addArrangedSubview(button)
             }
             grid.addArrangedSubview(row)
@@ -974,22 +1032,22 @@ final class GUIControlPanelView: UIView {
 
     private func rebuildModuleButtons() {
         clearStack(moduleGroupsStack)
-        clearStack(quickModuleGroupsStack)
+        for stack in quickGroupStacks.values { clearStack(stack) }
         guard !moduleGroups.isEmpty else {
             moduleGroupsStack.addArrangedSubview(emptyModulesLabel())
-            quickModuleGroupsStack.addArrangedSubview(emptyModulesLabel())
+            quickGroupStacks["其他"]?.addArrangedSubview(emptyModulesLabel())
             return
         }
 
-        populateModuleGroups(
-            in: quickModuleGroupsStack,
-            columns: 5,
-            buttonHeight: ModulePanelMetrics.quickButtonHeight,
-            fontSize: ModulePanelMetrics.quickFontSize,
-            fixedButtonWidth: nil,
-            singleLine: true,
-            groupsPerRow: 2
-        )
+        let dedicated = Set(["戰鬥準備", "生產", "出發"])
+        for key in ["戰鬥準備", "生產", "出發", "其他"] {
+            guard let stack = quickGroupStacks[key] else { continue }
+            let groups = moduleGroups.filter { key == "其他" ? !dedicated.contains($0.name) : $0.name == key }
+            populateModuleGroups(in: stack, columns: 4,
+                buttonHeight: ModulePanelMetrics.quickButtonHeight,
+                fontSize: ModulePanelMetrics.quickFontSize,
+                fixedButtonWidth: nil, singleLine: true, groups: groups)
+        }
         populateModuleGroups(
             in: moduleGroupsStack,
             columns: 4,
@@ -1007,10 +1065,11 @@ final class GUIControlPanelView: UIView {
         fontSize: CGFloat,
         fixedButtonWidth: CGFloat?,
         singleLine: Bool,
-        groupsPerRow: Int = 1
+        groupsPerRow: Int = 1,
+        groups: [GUIModuleGroup]? = nil
     ) {
         var groupViews: [UIView] = []
-        for group in moduleGroups {
+        for group in groups ?? moduleGroups {
             let label = UILabel()
             label.text = group.name
             label.textColor = .white
@@ -1172,6 +1231,15 @@ final class GUIControlPanelView: UIView {
             } else {
                 button.accessibilityHint = running ? "在線" : "離線"
             }
+        }
+        for button in slotGroupButtons {
+            let first = button.tag * 5 + 1
+            let eligible = Set(first..<(first + 5)).subtracting(automaticSelectionBlockedSlots)
+            let allSelected = !eligible.isEmpty && eligible.isSubset(of: selectedSlots)
+            button.backgroundColor = allSelected
+                ? UIColor(red: 0.06, green: 0.52, blue: 0.34, alpha: 1)
+                : UIColor(red: 0.16, green: 0.35, blue: 0.48, alpha: 1)
+            button.accessibilityLabel = "Slot \(first) 至 \(first + 4)，\(allSelected ? "取消選取" : "選取")"
         }
     }
 
@@ -1353,6 +1421,7 @@ final class GUIControlPanelView: UIView {
         row.axis = .horizontal
         row.spacing = 5
         row.distribution = .fill
+        row.alignment = .center
         return row
     }
 
@@ -1460,11 +1529,17 @@ final class GUIControlPanelView: UIView {
     @objc private func closeTapped() { onClose?() }
     @objc private func refreshTapped() { onRefresh?() }
     @objc private func restartControllerTapped() {
+        guard !heartbeatFresh, !restartControllerInFlight else { return }
+        restartControllerInFlight = true
         restartControllerButton.isEnabled = false
+        restartControllerButton.alpha = 0.35
         setStatus("正在要求 PC 重啟 GUI_TEST_PC 控制器...", good: true)
         onRestartController?()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.restartControllerButton.isEnabled = true
+            guard let self else { return }
+            self.restartControllerInFlight = false
+            self.restartControllerButton.isEnabled = !self.heartbeatFresh
+            self.restartControllerButton.alpha = self.restartControllerButton.isEnabled ? 1 : 0.35
         }
     }
 
@@ -1498,6 +1573,20 @@ final class GUIControlPanelView: UIView {
             selectedSlots.remove(slot)
         } else {
             selectedSlots.insert(slot)
+        }
+        refreshSlotButtons()
+    }
+
+    @objc private func slotGroupTapped(_ sender: UIButton) {
+        let group = sender.tag
+        guard (0..<4).contains(group) else { return }
+        let first = group * 5 + 1
+        let blocked = automaticSelectionBlockedSlots
+        let skipped = Set(first..<(first + 5)).intersection(blocked).sorted()
+        autoSelectedSlot = nil
+        selectedSlots = SlotGroupSelection.toggle(group: group, selected: selectedSlots, blocked: blocked)
+        if !skipped.isEmpty {
+            setStatus("略過播放中或切換中的 Slot：\(skipped.map(String.init).joined(separator: ","))", good: false)
         }
         refreshSlotButtons()
     }
@@ -1822,3 +1911,4 @@ private extension Collection where Element == String {
         sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 }
+

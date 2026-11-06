@@ -28,13 +28,13 @@ final class LegacyStreamControlsView: UIVisualEffectView {
     func setExpanded(_ expanded: Bool, animated: Bool) {
         guard expanded != isExpanded else { return }
         isExpanded = expanded
-        toggleButton.isHidden = expanded
-        previousButton.isHidden = !expanded
-        listButton.isHidden = !expanded
-        nextButton.isHidden = !expanded
-        widthConstraint.constant = expanded ? 40 : 34
-        heightConstraint.constant = expanded ? 112 : 38
-        layer.cornerRadius = expanded ? 20 : 17
+        toggleButton.isHidden = false
+        previousButton.isHidden = true
+        listButton.isHidden = true
+        nextButton.isHidden = true
+        widthConstraint.constant = 40
+        heightConstraint.constant = 40
+        layer.cornerRadius = 17
         onExpandedChanged?(expanded)
 
         let updates: () -> Void = {
@@ -55,6 +55,11 @@ final class LegacyStreamControlsView: UIVisualEffectView {
     }
 
     func setCurrentSlot(_ slot: Int) {
+        toggleButton.setImage(nil, for: .normal)
+        toggleButton.setTitle(String(format: "%02d", slot), for: .normal)
+        toggleButton.setTitleColor(UIColor(red: 0.46, green: 1.0, blue: 0.22, alpha: 1), for: .normal)
+        toggleButton.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 17, weight: .heavy)
+        toggleButton.accessibilityLabel = "Game list, current slot \(slot)"
         listButton.setImage(nil, for: .normal)
         listButton.setTitle(String(format: "%02d", slot), for: .normal)
         listButton.setTitleColor(
@@ -98,10 +103,10 @@ final class LegacyStreamControlsView: UIVisualEffectView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
 
-        widthConstraint = widthAnchor.constraint(equalToConstant: 34)
-        heightConstraint = heightAnchor.constraint(equalToConstant: 38)
+        widthConstraint = widthAnchor.constraint(equalToConstant: 40)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 40)
         let buttonHeights = [
-            toggleButton.heightAnchor.constraint(equalToConstant: 38),
+            toggleButton.heightAnchor.constraint(equalToConstant: 40),
             previousButton.heightAnchor.constraint(equalToConstant: 36),
             listButton.heightAnchor.constraint(equalToConstant: 40),
             nextButton.heightAnchor.constraint(equalToConstant: 36)
@@ -128,7 +133,7 @@ final class LegacyStreamControlsView: UIVisualEffectView {
     }
 
     @objc private func toggleTapped() {
-        setExpanded(true, animated: true)
+        onList?()
     }
 
     @objc private func previousTapped() {
@@ -153,6 +158,8 @@ final class FixedRightRailView: UIVisualEffectView {
     var onAssets: (() -> Void)?
     var onKeyboard: (() -> Void)?
     var onControlPanel: (() -> Void)?
+    var onPrevious: (() -> Void)?
+    var onNext: (() -> Void)?
 
     init() {
         super.init(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
@@ -173,18 +180,29 @@ final class FixedRightRailView: UIVisualEffectView {
         let assets = iconButton("dollarsign.circle.fill", label: "最新角色資產")
         let keyboard = iconButton("keyboard", label: "Keyboard")
         let grid = iconButton("square.grid.2x2.fill", label: "GUI_TEST_PC")
+        let previous = iconButton("chevron.up", label: "Previous game")
+        let next = iconButton("chevron.down", label: "Next game")
         assets.addTarget(self, action: #selector(assetsTapped), for: .touchUpInside)
         keyboard.addTarget(self, action: #selector(keyboardTapped), for: .touchUpInside)
         grid.addTarget(self, action: #selector(controlPanelTapped), for: .touchUpInside)
+        previous.addTarget(self, action: #selector(previousTapped), for: .touchUpInside)
+        next.addTarget(self, action: #selector(nextTapped), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [assets, keyboard, grid])
+        func row(_ left: UIView, _ right: UIView) -> UIStackView {
+            let result = UIStackView(arrangedSubviews: [left, right])
+            result.axis = .horizontal
+            result.spacing = 2
+            result.distribution = .fillEqually
+            return result
+        }
+        let stack = UIStackView(arrangedSubviews: [row(UIView(), assets), row(previous, keyboard), row(next, grid)])
         stack.axis = .vertical
         stack.spacing = 4
         stack.distribution = .fillEqually
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 42),
+            widthAnchor.constraint(equalToConstant: 80),
             heightAnchor.constraint(equalToConstant: 140),
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
@@ -214,4 +232,8 @@ final class FixedRightRailView: UIVisualEffectView {
     @objc private func controlPanelTapped() {
         onControlPanel?()
     }
+
+    @objc private func previousTapped() { onPrevious?() }
+    @objc private func nextTapped() { onNext?() }
 }
+

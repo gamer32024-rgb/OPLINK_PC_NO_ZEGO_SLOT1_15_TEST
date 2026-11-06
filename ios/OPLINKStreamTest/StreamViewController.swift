@@ -235,8 +235,8 @@ final class StreamViewController: UIViewController {
         NSLayoutConstraint.activate([
             streamSlotPicker.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 4),
             streamSlotPicker.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
-            streamSlotPicker.widthAnchor.constraint(equalToConstant: 82),
-            streamSlotPicker.heightAnchor.constraint(equalToConstant: 300),
+            streamSlotPicker.widthAnchor.constraint(equalToConstant: 270),
+            streamSlotPicker.heightAnchor.constraint(equalToConstant: 200),
             guiPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             guiPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             guiPanel.topAnchor.constraint(equalTo: view.topAnchor),
@@ -688,6 +688,7 @@ final class StreamViewController: UIViewController {
         }
 
         streamSlotPicker.onSelectSlot = { [weak self] slot in
+            self?.streamSlotPicker.isHidden = true
             self?.connect(slot: slot)
         }
 
@@ -702,6 +703,8 @@ final class StreamViewController: UIViewController {
         fixedRightRail.onControlPanel = { [weak self] in self?.showGUIPanel() }
         fixedRightRail.onAssets = { [weak self] in self?.showAssetInventory() }
         fixedRightRail.onKeyboard = { [weak self] in self?.toggleKeyboardPanel() }
+        fixedRightRail.onPrevious = { [weak self] in self?.previousSlotTapped() }
+        fixedRightRail.onNext = { [weak self] in self?.nextSlotTapped() }
 
         assetInventoryPanel.onClose = { [weak self] in self?.assetInventoryPanel.isHidden = true }
         assetInventoryPanel.onRefresh = { [weak self] in self?.refreshAssetInventory() }
@@ -2197,3 +2200,4 @@ extension StreamViewController: UITextFieldDelegate {
         return true
     }
 }
+

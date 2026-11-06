@@ -25,6 +25,11 @@ jobs:
           swiftc ios/OPLINKStreamTest/TailnetCandidateFilter.swift ios/OPLINKStreamTest/PreparedOfferGate.swift ios/tests/tailnet-filter/main.swift -o "$RUNNER_TEMP/tailnet-filter-test"
           "$RUNNER_TEMP/tailnet-filter-test"
 
+      - name: Test slot group selection
+        run: |
+          swiftc ios/OPLINKStreamTest/SlotGroupSelection.swift ios/tests/slot-group/main.swift -o "$RUNNER_TEMP/slot-group-test"
+          "$RUNNER_TEMP/slot-group-test"
+
       - name: Audit public repository
         run: python3 scripts/audit_public_repo.py
 
@@ -50,3 +55,4 @@ jobs:
           path: ios/dist/OPLINKStreamTest-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+

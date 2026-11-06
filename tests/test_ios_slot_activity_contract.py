@@ -45,7 +45,9 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         )
 
         self.assertIn('iconButton("dollarsign.circle.fill"', rail)
-        self.assertIn("arrangedSubviews: [assets, keyboard, grid]", rail)
+        self.assertIn("row(UIView(), assets), row(previous, keyboard), row(next, grid)", rail)
+        self.assertIn("fixedRightRail.onPrevious", controller)
+        self.assertIn("fixedRightRail.onNext", controller)
         self.assertIn("fixedRightRail.onAssets", controller)
         self.assertIn("fetchAssetInventory(baseURL: baseURL, slots: OPLINKSlots.all)", controller)
         self.assertIn("func fetchAssetInventory", api)
@@ -86,9 +88,12 @@ class IOSSlotActivityContractTests(unittest.TestCase):
 
         self.assertIn("static let compactScale: CGFloat = 0.8", panel)
         self.assertIn("UIStackView(arrangedSubviews: [modulesScroll, chainRow])", panel)
-        self.assertIn("multiplier: ModulePanelMetrics.compactScale", panel)
+        self.assertIn("multiplier: 1", panel)
         self.assertIn("buildPresetGrid(),\n            automationRow", panel)
-        self.assertIn("columns: 5", panel)
+        self.assertIn("columns: 4", panel)
+        self.assertIn('makeQuickGroupRegion("戰鬥準備")', panel)
+        self.assertIn("installRegion(slotParts[0], x: 768, y: 0, width: 421, height: 255)", panel)
+        self.assertIn("installRegion(actionRail, x: 0, y: 59, width: 121, height: 422)", panel)
         self.assertIn("buttonHeight: ModulePanelMetrics.quickButtonHeight", panel)
         self.assertIn("fontSize: ModulePanelMetrics.quickFontSize", panel)
 
@@ -145,15 +150,31 @@ class IOSSlotActivityContractTests(unittest.TestCase):
     def test_offline_controller_restart_button_cannot_collapse_into_a_line(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
-        self.assertIn(
-            "restartControllerButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 30)",
-            panel,
-        )
-        self.assertIn(
-            "restartControllerButton.setContentCompressionResistancePriority(.required, for: .vertical)",
-            panel,
-        )
+        self.assertIn("installRegion(restartControllerButton, x: 4, y: 574, width: 55, height: 55)", panel)
+        self.assertIn("restartControllerButton.isEnabled = !heartbeatFresh && !restartControllerInFlight", panel)
+        self.assertIn("restartControllerButton.alpha = restartControllerButton.isEnabled ? 1 : 0.35", panel)
+
+    def test_slot_group_shortcuts_never_call_stop_and_skip_busy_slots(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        group = panel.split("@objc private func slotGroupTapped(_ sender: UIButton) {", 1)[1].split(
+            "@objc private func slotLongPressed", 1
+        )[0]
+        self.assertIn("automaticSelectionBlockedSlots", group)
+        self.assertIn("SlotGroupSelection.toggle", group)
+        self.assertNotIn("onStopSlot", group)
+        self.assertNotIn("onCancelAutomation", group)
+
+    def test_draggable_slot_control_shows_picker_and_fixed_arrows(self) -> None:
+        rail = (ROOT / "ios/OPLINKStreamTest/LegacyStreamControlsView.swift").read_text(encoding="utf-8")
+        controller = (ROOT / "ios/OPLINKStreamTest/StreamViewController.swift").read_text(encoding="utf-8")
+        picker = (ROOT / "ios/OPLINKStreamTest/StreamSlotPickerView.swift").read_text(encoding="utf-8")
+        self.assertIn('toggleButton.setTitle(String(format: "%02d", slot)', rail)
+        self.assertIn("@objc private func toggleTapped() {\n        onList?()", rail)
+        self.assertIn("handleLegacyControlPan", controller)
+        self.assertIn("self?.streamSlotPicker.isHidden = true", controller)
+        self.assertIn("(slot - 1) % 5 == 0", picker)
 
 
 if __name__ == "__main__":
     unittest.main()
+
