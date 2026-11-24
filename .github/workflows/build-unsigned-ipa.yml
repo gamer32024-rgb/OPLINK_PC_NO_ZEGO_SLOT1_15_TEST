@@ -30,6 +30,11 @@ jobs:
           swiftc ios/OPLINKStreamTest/SlotGroupSelection.swift ios/tests/slot-group/main.swift -o "$RUNNER_TEMP/slot-group-test"
           "$RUNNER_TEMP/slot-group-test"
 
+      - name: Test module chain editing
+        run: |
+          swiftc ios/OPLINKStreamTest/ModuleChainEdit.swift ios/tests/module-chain/main.swift -o "$RUNNER_TEMP/module-chain-test"
+          "$RUNNER_TEMP/module-chain-test"
+
       - name: Audit public repository
         run: python3 scripts/audit_public_repo.py
 

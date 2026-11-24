@@ -27,6 +27,7 @@ final class GUIControlPanelView: UIView {
 
     private let card = UIView()
     private let statusLabel = UILabel()
+    private var statusDismissTask: DispatchWorkItem?
     private let slotButtons = OPLINKSlots.range.map { _ in UIButton(type: .system) }
     private let slotGroupButtons = (0..<4).map { _ in UIButton(type: .system) }
     private let chainButtons = (0..<10).map { _ in UIButton(type: .system) }
@@ -85,11 +86,7 @@ final class GUIControlPanelView: UIView {
     private var heartbeatFresh = false
     private var restartControllerInFlight = false
 
-    private enum ChainInsertionMode: Equatable {
-        case head
-        case tail
-        case index
-    }
+    private typealias ChainInsertionMode = ModuleChainEdit.Mode
 
     private struct ChainInsertion {
         var position: Int
@@ -243,10 +240,16 @@ final class GUIControlPanelView: UIView {
     }
 
     func setStatus(_ text: String, good: Bool) {
+        statusDismissTask?.cancel()
         statusLabel.text = text
         statusLabel.textColor = good
             ? UIColor(red: 0.52, green: 0.94, blue: 0.72, alpha: 1)
             : UIColor(red: 1, green: 0.48, blue: 0.4, alpha: 1)
+        statusLabel.isHidden = false
+        card.bringSubviewToFront(statusLabel)
+        let task = DispatchWorkItem { [weak self] in self?.statusLabel.isHidden = true }
+        statusDismissTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
     }
 
     func finishPlaybackSubmission(
@@ -303,6 +306,12 @@ final class GUIControlPanelView: UIView {
 
         statusLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         statusLabel.numberOfLines = 2
+        statusLabel.textAlignment = .center
+        statusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.82)
+        statusLabel.layer.cornerRadius = 8
+        statusLabel.layer.masksToBounds = true
+        statusLabel.isUserInteractionEnabled = false
+        statusLabel.isHidden = true
         statusLabel.text = "選擇 Slot 與模組後播放"
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.82)
         restartControllerButton.setTitle("控", for: .normal)
@@ -315,18 +324,18 @@ final class GUIControlPanelView: UIView {
         restartControllerButton.alpha = 0.35
         restartControllerButton.addTarget(self, action: #selector(restartControllerTapped), for: .touchUpInside)
 
-        installRegion(slotParts[0], x: 768, y: 0, width: 421, height: 255)
-        installRegion(slotParts[1], x: 0, y: 0, width: 442, height: 60)
-        installRegion(slotParts[2], x: 585, y: 299, width: 499, height: 219)
-        installRegion(slotParts[3], x: 88, y: 564, width: 420, height: 66)
-        installRegion(restartControllerButton, x: 4, y: 574, width: 55, height: 55)
-        installRegion(makeQuickGroupRegion("戰鬥準備"), x: 123, y: 62, width: 326, height: 182)
-        installRegion(makeQuickGroupRegion("生產"), x: 124, y: 245, width: 324, height: 188)
-        installRegion(makeQuickGroupRegion("出發"), x: 124, y: 436, width: 329, height: 128)
-        installRegion(makeQuickGroupRegion("其他"), x: 445, y: 3, width: 320, height: 250)
-        installRegion(chainRow, x: 520, y: 524, width: 574, height: 105)
-        installRegion(actionRail, x: 0, y: 59, width: 121, height: 422)
-        installRegion(statusLabel, x: 1095, y: 540, width: 180, height: 85)
+        installRegion(slotParts[0], x: 760, y: 136, width: 443, height: 179)
+        installRegion(slotParts[1], x: 762, y: 4, width: 442, height: 60)
+        installRegion(slotParts[2], x: 774, y: 428, width: 503, height: 193)
+        installRegion(slotParts[3], x: 763, y: 66, width: 440, height: 70)
+        installRegion(restartControllerButton, x: 719, y: 568, width: 55, height: 55)
+        installRegion(makeQuickGroupRegion("戰鬥準備"), x: 293, y: 0, width: 468, height: 211)
+        installRegion(makeQuickGroupRegion("生產"), x: 291, y: 210, width: 466, height: 235)
+        installRegion(makeQuickGroupRegion("出發"), x: 295, y: 444, width: 425, height: 183)
+        installRegion(makeQuickGroupRegion("其他"), x: 0, y: 0, width: 293, height: 630)
+        installRegion(chainRow, x: 764, y: 317, width: 436, height: 105)
+        installRegion(actionRail, x: 1203, y: 0, width: 77, height: 401)
+        installRegion(statusLabel, x: 400, y: 8, width: 480, height: 72)
 
         let preferredHeight = card.heightAnchor.constraint(equalToConstant: 420)
         preferredHeight.priority = .defaultHigh
@@ -1475,16 +1484,6 @@ final class GUIControlPanelView: UIView {
         moduleChain.firstIndex(where: { $0 != nil }) == 0 ? 0 : 1
     }
 
-    @discardableResult
-    private func packChain(_ values: [String], preferredStart: Int) -> Int {
-        let start = values.count == 10 ? 0 : max(0, min(preferredStart, 10 - values.count))
-        moduleChain = Array(repeating: nil, count: 10)
-        for (offset, name) in values.enumerated() {
-            moduleChain[start + offset] = name
-        }
-        return start
-    }
-
     private func mapPresetToEditableCells(_ values: [String]) {
         let mapped = Array(values.prefix(8))
         moduleChain = Array(repeating: nil, count: 10)
@@ -1501,22 +1500,16 @@ final class GUIControlPanelView: UIView {
     }
 
     private func insertModule(_ moduleName: String) {
-        var values = chainValues()
-        guard values.count < 10 else {
+        guard let result = ModuleChainEdit.insert(moduleName, chain: moduleChain,
+            position: chainInsertion.position, start: chainInsertion.start, mode: chainInsertion.mode) else {
             setStatus("加入後會超過 10 個模組，本次未加入。", good: false)
             return
         }
         activePresetIndex = nil
-        let position = chainInsertion.mode == .tail
-            ? values.count
-            : min(chainInsertion.position, values.count)
-        values.insert(moduleName, at: position)
-        let preferredStart = chainInsertion.mode == .head ? 0 : chainInsertion.start
-        let start = packChain(values, preferredStart: preferredStart)
-        let nextPosition = position + 1
-        chainInsertion.position = nextPosition
-        chainInsertion.start = start
-        chainInsertion.activeCell = min(9, start + nextPosition)
+        moduleChain = result.chain
+        chainInsertion.position = result.nextPosition
+        chainInsertion.start = result.start
+        chainInsertion.activeCell = result.activeCell
         refreshChainButtons()
         refreshPresetButtons()
     }
@@ -1627,8 +1620,9 @@ final class GUIControlPanelView: UIView {
         let index = sender.tag
         activeChainIndex = index
         if let removedModule = moduleChain[index] {
+            guard let anchor = ModuleChainEdit.anchorBeforeRemoving(moduleChain, index: index) else { return }
             moduleChain[index] = nil
-            chainInsertion = ChainInsertion(position: 0, start: chainStart(), mode: .index, activeCell: index)
+            chainInsertion = ChainInsertion(position: anchor.position, start: anchor.start, mode: .index, activeCell: index)
             refreshChainButtons()
             setStatus("已清除第 \(activeChainIndex + 1) 格：\(removedModule)", good: true)
             return

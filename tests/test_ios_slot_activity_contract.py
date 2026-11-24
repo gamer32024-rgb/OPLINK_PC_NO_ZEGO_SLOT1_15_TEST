@@ -92,8 +92,8 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertIn("buildPresetGrid(),\n            automationRow", panel)
         self.assertIn("columns: 4", panel)
         self.assertIn('makeQuickGroupRegion("戰鬥準備")', panel)
-        self.assertIn("installRegion(slotParts[0], x: 768, y: 0, width: 421, height: 255)", panel)
-        self.assertIn("installRegion(actionRail, x: 0, y: 59, width: 121, height: 422)", panel)
+        self.assertIn("installRegion(slotParts[0], x: 760, y: 136, width: 443, height: 179)", panel)
+        self.assertIn("installRegion(actionRail, x: 1203, y: 0, width: 77, height: 401)", panel)
         self.assertIn("buttonHeight: ModulePanelMetrics.quickButtonHeight", panel)
         self.assertIn("fontSize: ModulePanelMetrics.quickFontSize", panel)
 
@@ -150,7 +150,7 @@ class IOSSlotActivityContractTests(unittest.TestCase):
     def test_offline_controller_restart_button_cannot_collapse_into_a_line(self) -> None:
         panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
 
-        self.assertIn("installRegion(restartControllerButton, x: 4, y: 574, width: 55, height: 55)", panel)
+        self.assertIn("installRegion(restartControllerButton, x: 719, y: 568, width: 55, height: 55)", panel)
         self.assertIn("restartControllerButton.isEnabled = !heartbeatFresh && !restartControllerInFlight", panel)
         self.assertIn("restartControllerButton.alpha = restartControllerButton.isEnabled ? 1 : 0.35", panel)
 
@@ -173,6 +173,40 @@ class IOSSlotActivityContractTests(unittest.TestCase):
         self.assertIn("handleLegacyControlPan", controller)
         self.assertIn("self?.streamSlotPicker.isHidden = true", controller)
         self.assertIn("(slot - 1) % 5 == 0", picker)
+
+    def test_module_removal_preserves_its_insertion_anchor(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        tapped = panel.split("@objc private func chainTapped(_ sender: UIButton) {", 1)[1].split(
+            "@objc private func presetTapped", 1
+        )[0]
+        self.assertLess(tapped.index("ModuleChainEdit.anchorBeforeRemoving"), tapped.index("moduleChain[index] = nil"))
+        self.assertIn("position: anchor.position, start: anchor.start", tapped)
+        self.assertIn("ModuleChainEdit.insert(moduleName, chain: moduleChain", panel)
+
+    def test_all_user_supplied_panel_coordinates_are_preserved(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        for line in (
+            'installRegion(slotParts[0], x: 760, y: 136, width: 443, height: 179)',
+            'installRegion(slotParts[1], x: 762, y: 4, width: 442, height: 60)',
+            'installRegion(slotParts[2], x: 774, y: 428, width: 503, height: 193)',
+            'installRegion(slotParts[3], x: 763, y: 66, width: 440, height: 70)',
+            'installRegion(restartControllerButton, x: 719, y: 568, width: 55, height: 55)',
+            'installRegion(makeQuickGroupRegion("戰鬥準備"), x: 293, y: 0, width: 468, height: 211)',
+            'installRegion(makeQuickGroupRegion("生產"), x: 291, y: 210, width: 466, height: 235)',
+            'installRegion(makeQuickGroupRegion("出發"), x: 295, y: 444, width: 425, height: 183)',
+            'installRegion(makeQuickGroupRegion("其他"), x: 0, y: 0, width: 293, height: 630)',
+            'installRegion(chainRow, x: 764, y: 317, width: 436, height: 105)',
+            'installRegion(actionRail, x: 1203, y: 0, width: 77, height: 401)',
+        ):
+            with self.subTest(region=line):
+                self.assertIn(line, panel)
+
+    def test_status_message_is_temporary_and_does_not_capture_touches(self) -> None:
+        panel = (ROOT / "ios/OPLINKStreamTest/GUIControlPanelView.swift").read_text(encoding="utf-8")
+        self.assertIn("statusLabel.isUserInteractionEnabled = false", panel)
+        self.assertIn("statusDismissTask?.cancel()", panel)
+        self.assertIn("self?.statusLabel.isHidden = true", panel)
+        self.assertIn("DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)", panel)
 
 
 if __name__ == "__main__":
